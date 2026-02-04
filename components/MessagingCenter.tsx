@@ -36,6 +36,7 @@ interface MessagingCenterProps {
   userId: string;
   userRole: "student" | "teacher" | "admin";
   userName: string;
+  initialChatUserId?: string | null;
 }
 
 interface ContactUser {
@@ -46,7 +47,7 @@ interface ContactUser {
   subject?: string;
 }
 
-export function MessagingCenter({ userId, userRole, userName }: MessagingCenterProps) {
+export function MessagingCenter({ userId, userRole, userName, initialChatUserId }: MessagingCenterProps) {
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewChat, setShowNewChat] = useState(false);
@@ -54,6 +55,13 @@ export function MessagingCenter({ userId, userRole, userName }: MessagingCenterP
   const [loadingContacts, setLoadingContacts] = useState(false);
 
   const { conversations, loading: loadingConversations, startDirectConversation, refresh } = useMessaging(userId);
+
+  // Handle initial chat request
+  useEffect(() => {
+    if (initialChatUserId) {
+      handleStartChat(initialChatUserId);
+    }
+  }, [initialChatUserId]);
 
   // Fetch available contacts based on role
   useEffect(() => {

@@ -37,6 +37,7 @@ import { MobileNavigation } from '@/components/MobileNavigation';
 import EventManager from '@/components/EventManager';
 import MessagingCenter from '@/components/MessagingCenter';
 import { TeacherDashboardSkeleton } from '@/components/DashboardSkeleton';
+import { PwaInstallButton } from '@/components/PwaInstallButton';
 import { Users, CalendarDays, MessageSquare } from 'lucide-react';
 
 const supabase = createClient(
@@ -95,7 +96,8 @@ export default function TeacherDashboard() {
   const [userProfile, setUserProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
   const [allNotifications, setAllNotifications] = useState<{id: string; type: string; title: string; message: string; created_at: string; is_read: boolean}[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
-  const [showArchived, setShowArchived] = useState(false); // Declare showArchived variable
+  const [showArchived, setShowArchived] = useState(false);
+  const [chatUserId, setChatUserId] = useState<string | null>(null);
 
   useEffect(() => {
     checkAuth();
@@ -233,6 +235,11 @@ export default function TeacherDashboard() {
     fetchContent();
   }
 
+  function handleStartChat(studentId: string) {
+    setChatUserId(studentId);
+    setActiveTab('messages');
+  }
+
   async function handleLogout() {
     await supabase.auth.signOut();
     router.push('/');
@@ -293,8 +300,12 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* Profile Dropdown */}
-          <div className="relative">
+          {/* Actions & Profile */}
+          <div className="flex items-center gap-3">
+            <PwaInstallButton />
+            
+            {/* Profile Dropdown */}
+            <div className="relative">
             <button
               onClick={() => setShowProfileDropdown(!showProfileDropdown)}
               onBlur={() => setTimeout(() => setShowProfileDropdown(false), 200)}
@@ -383,6 +394,7 @@ export default function TeacherDashboard() {
                 </div>
               </div>
             )}
+            </div>
           </div>
         </div>
       </header>
@@ -705,7 +717,7 @@ export default function TeacherDashboard() {
 
         {activeTab === 'students' && user && (
           <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            <MyStudents teacherId={user.id} />
+            <MyStudents teacherId={user.id} onStartChat={handleStartChat} />
           </div>
         )}
 
@@ -715,9 +727,14 @@ export default function TeacherDashboard() {
   </div>
   )}
 
-{activeTab === 'messages' && user && (
+  {activeTab === 'messages' && user && (
     <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-      <MessagingCenter userId={user.id} userRole="teacher" userName={userProfile?.full_name || ''} />
+      <MessagingCenter
+        userId={user.id}
+        userRole="teacher"
+        userName={userProfile?.full_name || ''}
+        initialChatUserId={chatUserId}
+      />
     </div>
   )}
 

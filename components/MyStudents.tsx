@@ -13,6 +13,7 @@ import {
   Mail,
   FileText,
   Brain,
+  MessageSquare,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -49,9 +50,10 @@ interface Student {
 
 interface MyStudentsProps {
   teacherId: string;
+  onStartChat?: (studentId: string) => void;
 }
 
-export default function MyStudents({ teacherId }: MyStudentsProps) {
+export default function MyStudents({ teacherId, onStartChat }: MyStudentsProps) {
   const [loading, setLoading] = useState(true);
   const [assignments, setAssignments] = useState<TeacherAssignment[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -339,6 +341,17 @@ export default function MyStudents({ teacherId }: MyStudentsProps) {
                   <Brain className="w-4 h-4 mr-1" />
                   Quiz
                 </Button>
+                {onStartChat && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onStartChat(student.id)}
+                    className="flex-1 text-blue-400 hover:text-blue-300 hover:bg-blue-500/10"
+                  >
+                    <MessageSquare className="w-4 h-4 mr-1" />
+                    Chat
+                  </Button>
+                )}
               </div>
             </div>
           ))}

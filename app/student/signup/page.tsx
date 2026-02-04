@@ -127,7 +127,7 @@ export default function StudentSignup() {
 
       if (authData.user) {
         // Create student profile with admission number and username
-        const { error: profileError } = await supabase.from("profiles").upsert({
+        const { data: profileData, error: profileError } = await supabase.from("profiles").upsert({
           id: authData.user.id,
           full_name: fullName,
           username: username ? username.toLowerCase() : null,
@@ -138,13 +138,26 @@ export default function StudentSignup() {
           profile_completed: false,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'id'
         });
 
         if (profileError) {
           console.error("Profile creation error:", profileError);
-          // Don't fail signup if profile creation fails - it can be created later
+          console.error("Error details:", {
+            message: profileError.message,
+            details: profileError.details,
+            hint: profileError.hint,
+            code: profileError.code
+          });
+          
+          // Show error to user if profile creation fails
+          setError(`Account created but profile setup failed: ${profileError.message}. Please contact support with admission number: ${newAdmissionNumber}`);
+          setLoading(false);
+          return;
         }
 
+        console.log("Profile created successfully:", profileData);
         setAdmissionNumber(newAdmissionNumber);
         setSuccess(true);
       }

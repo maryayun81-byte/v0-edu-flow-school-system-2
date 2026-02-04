@@ -38,7 +38,7 @@ export default function StudentLogin() {
 
       if (isAdmissionNumber || isUsername) {
         // Look up the user's email from their profile
-        let query = supabase.from("profiles").select("id, email, admission_number");
+        let query = supabase.from("profiles").select("id, email, admission_number, username, full_name");
         
         if (isAdmissionNumber) {
           query = query.eq("admission_number", identifier.toUpperCase());
@@ -48,10 +48,19 @@ export default function StudentLogin() {
 
         const { data: profileData, error: lookupError } = await query.single();
 
+        console.log("Profile lookup:", {
+          identifier,
+          isAdmissionNumber,
+          isUsername,
+          profileData,
+          lookupError
+        });
+
         if (lookupError || !profileData) {
+          console.error("Profile lookup failed:", lookupError);
           setError(isAdmissionNumber 
-            ? "No account found with this admission number" 
-            : "No account found with this username");
+            ? "No account found with this admission number. Please check and try again." 
+            : "No account found with this username. Please check and try again.");
           setLoading(false);
           return;
         }
@@ -63,6 +72,8 @@ export default function StudentLogin() {
           // Use placeholder email format for students without email
           authEmail = `${profileData.admission_number.toLowerCase().replace(/-/g, "")}@student.eduflow.local`;
         }
+        
+        console.log("Using auth email:", authEmail);
       }
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
