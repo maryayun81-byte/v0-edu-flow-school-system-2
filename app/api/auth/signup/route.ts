@@ -17,6 +17,7 @@ export async function POST(request: NextRequest) {
       options: {
         data: {
           full_name,
+          role: 'teacher',
         },
       },
     });
@@ -29,6 +30,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         { error: 'User creation failed' },
         { status: 400 }
+      );
+    }
+
+    // Create profile with role='teacher' to prevent default 'student' assignment
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: authData.user.id,
+      full_name,
+      email,
+      role: 'teacher',
+      profile_completed: false,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }, {
+      onConflict: 'id'
+    });
+
+    if (profileError) {
+      console.error('Profile creation error:', profileError);
+      return NextResponse.json(
+        { error: 'Account created but profile setup failed: ' + profileError.message },
+        { status: 500 }
       );
     }
 

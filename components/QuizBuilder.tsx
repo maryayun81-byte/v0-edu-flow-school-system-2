@@ -37,7 +37,7 @@ interface QuizQuestion {
   question_type: 'multiple_choice' | 'true_false' | 'short_answer';
   options: string[];
   correct_answer: string;
-  points: number;
+  marks: number;
   order_index: number;
 }
 
@@ -45,7 +45,7 @@ interface Quiz {
   id: string;
   title: string;
   description: string;
-  time_limit_minutes: number | null;
+  duration_minutes: number | null;
   points_per_question: number;
   is_published: boolean;
   scheduled_start: string | null;
@@ -123,7 +123,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
     setSelectedQuiz(quiz);
     setTitle(quiz.title);
     setDescription(quiz.description || '');
-    setTimeLimit(quiz.time_limit_minutes || '');
+    setTimeLimit(quiz.duration_minutes || '');
     setPointsPerQuestion(quiz.points_per_question);
     setScheduledStart(quiz.scheduled_start ? quiz.scheduled_start.slice(0, 16) : '');
     setScheduledEnd(quiz.scheduled_end ? quiz.scheduled_end.slice(0, 16) : '');
@@ -162,7 +162,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
       question_type: type,
       options: type === 'multiple_choice' ? ['', '', '', ''] : type === 'true_false' ? ['True', 'False'] : [],
       correct_answer: type === 'true_false' ? 'True' : '',
-      points: pointsPerQuestion,
+      marks: pointsPerQuestion,
       order_index: questions.length
     };
     setQuestions([...questions, newQuestion]);
@@ -225,7 +225,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
       const quizData = {
         title,
         description,
-        time_limit_minutes: timeLimit || null,
+        duration_minutes: timeLimit || null,
         points_per_question: pointsPerQuestion,
         is_published: publish,
         scheduled_start: scheduledStart || null,
@@ -265,7 +265,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
         question_type: q.question_type,
         options: q.options.filter(o => o.trim()),
         correct_answer: q.correct_answer,
-        points: q.points,
+        marks: q.marks,
         order_index: idx
       }));
 
@@ -328,7 +328,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
         .insert([{
           title: `${quiz.title} (Copy)`,
           description: quiz.description,
-          time_limit_minutes: quiz.time_limit_minutes,
+          duration_minutes: quiz.duration_minutes,
           points_per_question: quiz.points_per_question,
           is_published: false,
           created_by: userId
@@ -347,7 +347,7 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
             question_type: q.question_type,
             options: q.options,
             correct_answer: q.correct_answer,
-            points: q.points,
+            marks: q.marks,
             order_index: q.order_index
           }))
         );
@@ -450,10 +450,10 @@ export default function QuizBuilder({ userId, onClose }: QuizBuilderProps) {
                         <p className="text-gray-400 text-sm mb-3 line-clamp-1">{quiz.description}</p>
                       )}
                       <div className="flex flex-wrap items-center gap-4 text-sm">
-                        {quiz.time_limit_minutes && (
+                        {quiz.duration_minutes && (
                           <span className="flex items-center gap-1 text-gray-400">
                             <Clock className="w-4 h-4" />
-                            {quiz.time_limit_minutes} min
+                            {quiz.duration_minutes} min
                           </span>
                         )}
                         <span className="flex items-center gap-1 text-gray-400">
@@ -712,8 +712,8 @@ function QuestionEditor({
             <Trophy className="w-4 h-4 text-amber-400" />
             <input
               type="number"
-              value={question.points}
-              onChange={(e) => onUpdate({ points: parseInt(e.target.value) || 10 })}
+              value={question.marks}
+              onChange={(e) => onUpdate({ marks: parseInt(e.target.value) || 10 })}
               min="1"
               className="w-16 px-2 py-1 bg-white/10 border border-white/10 rounded-lg text-white text-sm text-center"
             />

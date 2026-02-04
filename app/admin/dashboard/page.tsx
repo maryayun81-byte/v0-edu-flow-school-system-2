@@ -26,6 +26,9 @@ import {
 } from "lucide-react";
 import EventManager from "@/components/EventManager";
 import TuitionManager from "@/components/TuitionManager";
+import NotificationCreator from "@/components/admin/NotificationCreator";
+import AdminTimetableTab from "@/components/admin/AdminTimetableTab";
+import { DashboardTabNavigation } from "@/components/DashboardTabNavigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -37,7 +40,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { MobileNavigation } from "@/components/MobileNavigation";
+import MessagingCenter from "@/components/MessagingCenter";
+import { MessageSquare } from "lucide-react";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -80,7 +84,12 @@ interface Student {
   created_at: string;
 }
 
-const FORM_LEVELS = ["Form 1", "Form 2", "Form 3", "Form 4"];
+const EDUCATION_SYSTEMS = ["8-4-4", "CBC"];
+const FORM_LEVELS_844 = ["Form 1", "Form 2", "Form 3", "Form 4"];
+const FORM_LEVELS_CBC = [
+  "Grade 1", "Grade 2", "Grade 3", "Grade 4", "Grade 5", "Grade 6",
+  "Grade 7 (JSS)", "Grade 8 (JSS)", "Grade 9 (JSS)"
+];
 const SUBJECTS = [
   "Mathematics", "English", "Kiswahili", "Physics", "Chemistry", "Biology",
   "History", "Geography", "Computer Studies", "Business Studies", "Agriculture", "Religious Education"
@@ -89,7 +98,7 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "events" | "finance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications">("overview");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -104,39 +113,25 @@ export default function AdminDashboard() {
 
   // Form states
   const [className, setClassName] = useState("");
+  const [educationSystem, setEducationSystem] = useState("8-4-4");
   const [formLevel, setFormLevel] = useState("");
   const [selectedTeacher, setSelectedTeacher] = useState("");
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
 
   useEffect(() => {
-    checkAuth();
-  }, []);
-
-  async function checkAuth() {
-    const { data: { session } } = await supabase.auth.getSession();
+    // Auth is handled by layout.tsx - just fetch data
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setAdminId(session.user.id);
+        fetchData();
+      }
+      setLoading(false);
+    }
     
-    if (!session) {
-      router.push("/admin/login");
-      return;
-    }
-
-    // Check if user is admin
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", session.user.id)
-      .single();
-
-    if (profile?.role !== "admin") {
-      router.push("/admin/login");
-      return;
-    }
-
-    setAdminId(session.user.id);
-    await fetchData();
-    setLoading(false);
-  }
+    init();
+  }, []);
 
   async function fetchData() {
     // Fetch teachers
@@ -185,7 +180,8 @@ export default function AdminDashboard() {
       .from("classes")
       .insert({
         name: className,
-        form_level: formLevel,
+        form_level: educationSystem === "CBC" ? `${formLevel} (CBC)` : formLevel,
+        education_system: educationSystem,
         year: new Date().getFullYear(),
       });
 
@@ -234,12 +230,25 @@ export default function AdminDashboard() {
     router.push("/");
   }
 
-  function toggleSubject(subject: string) {
-    setSelectedSubjects(prev =>
-      prev.includes(subject)
-        ? prev.filter(s => s !== subject)
-        : [...prev, subject]
-    );
+  async function handleDeleteUser(userId: string, type: 'teacher' | 'student') {
+    if (!confirm(`Are you sure you want to delete this ${type}? This will remove their profile and all associated data.`)) return;
+
+    try {
+      // Delete from profiles - RLS must allow admins to delete
+      const { error } = await supabase.from("profiles").delete().eq("id", userId);
+      
+      if (error) throw error;
+      
+      // Also try to delete from teacher_classes if teacher
+      if (type === 'teacher') {
+        await supabase.from("teacher_classes").delete().eq("teacher_id", userId);
+      }
+
+      fetchData();
+    } catch (error: any) {
+      console.error("Error deleting user:", error);
+      alert("Failed to delete user. You may not have permission or there are dependencies.");
+    }
   }
 
   const filteredTeachers = teachers.filter(t =>
@@ -290,14 +299,31 @@ export default function AdminDashboard() {
               </div>
 
               <div className="space-y-2">
-                <Label>Form Level</Label>
-                <Select value={formLevel} onValueChange={setFormLevel}>
+                <Label>Education System</Label>
+                <Select value={educationSystem} onValueChange={(val) => {
+                  setEducationSystem(val);
+                  setFormLevel(""); // Reset form level when system changes
+                }}>
                   <SelectTrigger className="h-11 bg-muted border-border/50">
-                    <SelectValue placeholder="Select form level" />
+                    <SelectValue placeholder="Select system" />
                   </SelectTrigger>
                   <SelectContent>
-                    {FORM_LEVELS.map(form => (
-                      <SelectItem key={form} value={form}>{form}</SelectItem>
+                    {EDUCATION_SYSTEMS.map(sys => (
+                      <SelectItem key={sys} value={sys}>{sys}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Class/Grade Level</Label>
+                <Select value={formLevel} onValueChange={setFormLevel}>
+                  <SelectTrigger className="h-11 bg-muted border-border/50">
+                    <SelectValue placeholder={`Select ${educationSystem === "CBC" ? "grade" : "form"} level`} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(educationSystem === "CBC" ? FORM_LEVELS_CBC : FORM_LEVELS_844).map(level => (
+                      <SelectItem key={level} value={level}>{level}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -392,21 +418,49 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-xl border-b border-border/50">
+      {/* Mobile Header - Visible only on small screens */}
+      <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-xl border-b border-border/50 lg:hidden">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-primary rounded-lg flex items-center justify-center">
+                <ShieldCheck className="w-4 h-4 text-primary-foreground" />
+              </div>
+              <div>
+                <h1 className="font-bold text-sm text-foreground">Admin Dashboard</h1>
+                <p className="text-xs text-muted-foreground">EduFlow</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="h-9 w-9"
+                onClick={handleLogout}
+              >
+                <LogOut className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Desktop Header - Hidden on mobile */}
+      <header className="sticky top-0 z-40 bg-card/80 backdrop-blur-xl border-b border-border/50 hidden lg:block">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center gap-4">
               <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
                 <ShieldCheck className="w-5 h-5 text-primary-foreground" />
               </div>
-              <div className="hidden sm:block">
+              <div>
                 <h1 className="font-bold text-foreground">Admin Dashboard</h1>
                 <p className="text-sm text-muted-foreground">EduFlow Management</p>
               </div>
             </div>
 
-            <div className="flex-1 max-w-md hidden md:block">
+            <div className="flex-1 max-w-md">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
@@ -425,38 +479,30 @@ export default function AdminDashboard() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Navigation Tabs */}
-        <div className="flex gap-2 mb-8 overflow-x-auto pb-2">
-          {[
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 lg:py-8 pb-24 lg:pb-8">
+        {/* Responsive Tab Navigation */}
+        <DashboardTabNavigation
+          tabs={[
             { id: "overview", label: "Overview", icon: BarChart3 },
             { id: "teachers", label: "Teachers", icon: Users },
             { id: "classes", label: "Classes", icon: School },
             { id: "students", label: "Students", icon: GraduationCap },
             { id: "assignments", label: "Assignments", icon: BookOpen },
-            { id: "events", label: "Events", icon: Calendar },
+            { id: "timetables", label: "Timetables", icon: Calendar },
+            { id: "events", label: "Events", icon: Sparkles },
+            { id: "notifications", label: "Notifications", icon: Bell },
             { id: "finance", label: "Finance", icon: DollarSign },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as typeof activeTab)}
-              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl font-medium transition-all whitespace-nowrap ${
-                activeTab === tab.id
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-card text-muted-foreground hover:text-foreground hover:bg-card/80 border border-border/50"
-              }`}
-            >
-              <tab.icon className="w-4 h-4" />
-              <span className="hidden sm:inline">{tab.label}</span>
-            </button>
-          ))}
-        </div>
+            { id: "messages", label: "Messages", icon: MessageSquare },
+          ]}
+          activeTab={activeTab}
+          onTabChange={(tab) => setActiveTab(tab as typeof activeTab)}
+        />
 
         {/* Overview Tab */}
         {activeTab === "overview" && (
           <div className="space-y-8">
             {/* Stats Grid */}
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-card border border-border/50 rounded-xl p-5">
                 <div className="flex items-center gap-3 mb-2">
                   <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
@@ -569,17 +615,27 @@ export default function AdminDashboard() {
                         {new Date(teacher.created_at).toLocaleDateString()}
                       </td>
                       <td className="px-4 py-3">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() => {
-                            setSelectedTeacher(teacher.id);
-                            setShowAssignModal(true);
-                          }}
-                        >
-                          <UserPlus className="w-4 h-4 mr-1" />
-                          Assign
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
+                              setSelectedTeacher(teacher.id);
+                              setShowAssignModal(true);
+                            }}
+                          >
+                            <UserPlus className="w-4 h-4 mr-1" />
+                            Assign
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteUser(teacher.id, 'teacher')}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -640,6 +696,7 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Class</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">School</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Subjects</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-border/50">
@@ -662,6 +719,16 @@ export default function AdminDashboard() {
                             </span>
                           )}
                         </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:bg-destructive/10"
+                          onClick={() => handleDeleteUser(student.id, 'student')}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
                       </td>
                     </tr>
                   ))}
@@ -740,19 +807,38 @@ export default function AdminDashboard() {
           </div>
         )}
 
+        {/* Timetables Tab */}
+        {activeTab === "timetables" && (
+          <AdminTimetableTab />
+        )}
+
         {/* Events Tab */}
         {activeTab === "events" && adminId && (
           <EventManager userRole="admin" userId={adminId} />
+        )}
+
+        {/* Notifications Tab */}
+        {activeTab === "notifications" && adminId && (
+          <NotificationCreator adminId={adminId} />
         )}
 
         {/* Finance Tab */}
         {activeTab === "finance" && adminId && (
           <TuitionManager userRole="admin" userId={adminId} />
         )}
-      </div>
 
-      {/* Mobile Navigation */}
-      <MobileNavigation role="admin" />
+        {/* Messages Tab */}
+        {activeTab === "messages" && adminId && (
+          <div className="bg-white rounded-2xl shadow-sm border border-border/50 p-6">
+            <h2 className="text-2xl font-bold text-foreground mb-6">Messaging Center</h2>
+            <MessagingCenter
+              userId={adminId}
+              userRole="admin"
+              userName="Admin"
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -26,19 +26,23 @@ import {
   Settings,
   ChevronDown,
   X,
+  Users,
+  CalendarDays,
+  MessageSquare,
+  Home,
 } from 'lucide-react';
+import { FloatingActionMenu } from '@/components/FloatingActionMenu';
+import AssignmentWizard from '@/components/AssignmentWizard';
+import { TeacherDashboardSkeleton } from '@/components/TeacherDashboardSkeleton';
+import { PwaInstallButton } from '@/components/PwaInstallButton';
+import { DashboardTabNavigation } from '@/components/DashboardTabNavigation';
 import NotesManager from '@/components/NotesManager';
-import AssignmentsManager from '@/components/AssignmentsManager';
 import TimetableManager from '@/components/TimetableManager';
 import QuizBuilder from '@/components/QuizBuilder';
-import TeacherProfile from '@/components/TeacherProfile';
 import MyStudents from '@/components/MyStudents';
-import { MobileNavigation } from '@/components/MobileNavigation';
-import EventManager from '@/components/EventManager';
+import TeacherProfile from '@/components/TeacherProfile';
 import MessagingCenter from '@/components/MessagingCenter';
-import { TeacherDashboardSkeleton } from '@/components/DashboardSkeleton';
-import { PwaInstallButton } from '@/components/PwaInstallButton';
-import { Users, CalendarDays, MessageSquare } from 'lucide-react';
+import EventManager from '@/components/EventManager';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -81,7 +85,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 export default function TeacherDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages'>('notes');
+  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages'>('notes');
   const [showQuizBuilder, setShowQuizBuilder] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -100,7 +104,14 @@ export default function TeacherDashboard() {
   const [chatUserId, setChatUserId] = useState<string | null>(null);
 
   useEffect(() => {
-    checkAuth();
+    // Auth is handled by layout.tsx - just get user session
+    async function init() {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        setUser(session.user);
+      }
+    }
+    init();
   }, []);
 
   useEffect(() => {
@@ -109,6 +120,8 @@ export default function TeacherDashboard() {
       fetchUserProfile();
       fetchNotifications();
       setupRealtimeSubscriptions();
+      // Set loading to false after initial data fetch
+      setLoading(false);
     }
   }, [user]);
 
@@ -183,32 +196,44 @@ export default function TeacherDashboard() {
     }, 4000);
   }
 
-  async function checkAuth() {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
-        router.push('/teacher/login');
-        return;
-      }
-      setUser(session.user);
-      setLoading(false);
-    } catch (error) {
-      console.error('Auth error:', error);
-      router.push('/teacher/login');
-    }
-  }
-
   async function fetchContent() {
     try {
-      const [notesRes, assignmentsRes, timetablesRes] = await Promise.all([
+      const [notesRes, assignmentsRes] = await Promise.all([
         supabase.from('notes').select('*').order('created_at', { ascending: false }),
         supabase.from('assignments').select('*').order('due_date', { ascending: true }),
-        supabase.from('timetables').select('*').order('start_time', { ascending: true }),
       ]);
 
       if (notesRes.data) setNotes(notesRes.data);
       if (assignmentsRes.data) setAssignments(assignmentsRes.data);
-      if (timetablesRes.data) setTimetables(timetablesRes.data);
+
+      // Fetch timetable sessions for this teacher
+      if (user) {
+        const { data: sessionsData } = await supabase
+          .from('timetable_sessions')
+          .select(`
+            *,
+            classes!timetable_sessions_class_id_fkey(name)
+          `)
+          .eq('teacher_id', user.id)
+          .in('status', ['published', 'locked'])
+          .order('day_of_week')
+          .order('start_time');
+
+        if (sessionsData) {
+          // Transform to match old timetable structure
+          const transformedData = sessionsData.map((session: any) => ({
+            id: session.id,
+            title: session.classes?.name || 'Unknown Class',
+            day_of_week: session.day_of_week,
+            start_time: session.start_time,
+            end_time: session.end_time,
+            subject: session.subject,
+            room: session.room,
+            created_at: session.created_at || new Date().toISOString(),
+          }));
+          setTimetables(transformedData);
+        }
+      }
     } catch (error) {
       console.error('Error fetching content:', error);
     }
@@ -257,6 +282,388 @@ export default function TeacherDashboard() {
   const pendingCount = activeAssignments.filter(a => !a.is_completed).length;
   const upcomingDeadlines = activeAssignments.filter(a => new Date(a.due_date) > new Date() && !a.is_completed).length;
 
+  const tabs = [
+    { id: 'home', label: 'Home', icon: Home, count: null },
+    { id: 'notes', label: 'Notes', icon: FileText, count: activeNotes.length },
+    { id: 'assignments', label: 'Assignments', icon: Calendar, count: activeAssignments.length },
+    { id: 'timetable', label: 'Timetable', icon: Clock, count: timetables.length },
+    { id: 'quizzes', label: 'Quizzes', icon: Brain, count: null },
+    { id: 'students', label: 'My Students', icon: Users, count: null },
+    { id: 'messages', label: 'Messages', icon: MessageSquare, count: null },
+    { id: 'events', label: 'Events', icon: CalendarDays, count: null },
+    { id: 'notifications', label: 'Notifications', icon: Bell, count: unreadNotifCount > 0 ? unreadNotifCount : null },
+    { id: 'profile', label: 'Profile', icon: User, count: null },
+  ];
+
+  const handleTabChange = (id: string) => {
+    console.log('Tab change requested:', id); // Debug logging
+    if (id === 'home') {
+      setActiveTab('notes'); // Show notes/overview instead of redirecting
+    } else {
+      setActiveTab(id as any);
+    }
+    console.log('Active tab set to:', id === 'home' ? 'notes' : id); // Debug logging
+  };
+
+  const renderContent = () => {
+    switch (activeTab) {
+      case 'home':
+      case 'notes':
+        return (
+          <div className="space-y-6">
+            {showNoteForm && (
+              <div className="animate-[fadeIn_0.3s_ease-out]">
+                <NotesManager userId={user?.id} onClose={() => { setShowNoteForm(false); fetchContent(); }} />
+              </div>
+            )}
+            {!showNoteForm && (
+              <>
+                {activeNotes.length === 0 ? (
+                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+                    <FileText className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-400 text-lg">No active notes</p>
+                    <p className="text-gray-500 mt-2">Click "Add Note" to create your first note</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {activeNotes.map((note, idx) => (
+                      <div
+                        key={note.id}
+                        className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all group animate-[fadeIn_0.3s_ease-out]"
+                        style={{ animationDelay: `${idx * 50}ms` }}
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition-colors">{note.title}</h3>
+                          <div className="flex gap-1">
+                            {note.file_url && (
+                              <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-indigo-400 hover:bg-indigo-500/20 rounded-lg transition-all">
+                                <Eye className="w-4 h-4" />
+                              </a>
+                            )}
+                            <button
+                              onClick={async () => {
+                                if (confirm('Delete this note permanently?')) {
+                                  await supabase.from('notes').delete().eq('id', note.id);
+                                  fetchContent();
+                                }
+                              }}
+                              className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                        <p className="text-gray-400 text-sm mb-4 line-clamp-2">{note.description}</p>
+                        <div className="flex items-center justify-between text-xs text-gray-500">
+                          <span>{new Date(note.created_at).toLocaleDateString()}</span>
+                          {note.file_url && (
+                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300">
+                              <Download className="w-3 h-3" />
+                              Download
+                            </a>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+
+      case 'assignments':
+        return (
+          <div className="space-y-6">
+            {showAssignmentForm && (
+               <AssignmentWizard 
+                  userId={user?.id} 
+                  onClose={() => { setShowAssignmentForm(false); fetchContent(); }} 
+                  onSuccess={() => { setShowAssignmentForm(false); fetchContent(); }}
+               />
+            )}
+            {!showAssignmentForm && (
+              <>
+                {(showArchived ? archivedAssignments : activeAssignments).length === 0 ? (
+                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+                    <Calendar className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-400 text-lg">No {showArchived ? 'archived' : 'active'} assignments</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {(showArchived ? archivedAssignments : activeAssignments).map((assignment, idx) => {
+                      const dueDate = new Date(assignment.due_date);
+                      const isOverdue = dueDate < new Date() && !assignment.is_completed;
+                      const daysUntilDue = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+                      return (
+                        <div
+                          key={assignment.id}
+                          className={`bg-white/5 backdrop-blur-xl rounded-2xl p-6 border transition-all animate-[fadeIn_0.3s_ease-out] ${
+                            assignment.is_completed
+                              ? 'border-green-500/30 bg-green-500/5'
+                              : isOverdue
+                              ? 'border-red-500/30 bg-red-500/5'
+                              : 'border-white/10 hover:border-indigo-500/50'
+                          }`}
+                          style={{ animationDelay: `${idx * 50}ms` }}
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                            <button
+                              onClick={() => toggleAssignmentComplete(assignment.id, assignment.is_completed)}
+                              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${
+                                assignment.is_completed
+                                  ? 'bg-green-500 border-green-500 text-white'
+                                  : 'border-gray-500 hover:border-indigo-500'
+                              }`}
+                            >
+                              {assignment.is_completed && <CheckCircle2 className="w-5 h-5" />}
+                            </button>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3 mb-2">
+                                <h3 className={`text-lg font-bold ${assignment.is_completed ? 'text-green-400 line-through' : 'text-white'}`}>
+                                  {assignment.title}
+                                </h3>
+                                {isOverdue && (
+                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-1 rounded-full">OVERDUE</span>
+                                )}
+                                {assignment.is_completed && (
+                                  <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-1 rounded-full">COMPLETED</span>
+                                )}
+                              </div>
+                              <p className="text-gray-400 text-sm mb-3 line-clamp-2">{assignment.description}</p>
+                              <div className="flex flex-wrap items-center gap-4 text-sm">
+                                <span className={`font-medium ${isOverdue ? 'text-red-400' : 'text-indigo-400'}`}>
+                                  Due: {dueDate.toLocaleDateString()} {dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                                {!assignment.is_completed && !isOverdue && daysUntilDue <= 7 && (
+                                  <span className="text-amber-400">{daysUntilDue} days left</span>
+                                )}
+                                {assignment.github_repo_link && (
+                                  <a
+                                    href={assignment.github_repo_link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
+                                  >
+                                    <ExternalLink className="w-4 h-4" />
+                                    GitHub
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex gap-2 shrink-0">
+                              {!assignment.is_archived && (
+                                <button onClick={() => archiveAssignment(assignment.id)} className="p-2 text-amber-400 hover:bg-amber-500/20 rounded-lg transition-all">
+                                  <Archive className="w-5 h-5" />
+                                </button>
+                              )}
+                              <button
+                                onClick={async () => {
+                                  if (confirm('Delete this assignment permanently?')) {
+                                    await supabase.from('assignments').delete().eq('id', assignment.id);
+                                    fetchContent();
+                                  }
+                                }}
+                                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
+                              >
+                                <Trash2 className="w-5 h-5" />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+
+      case 'timetable':
+        return (
+          <div className="space-y-6">
+            {showTimetableForm && (
+              <div className="animate-[fadeIn_0.3s_ease-out]">
+                <TimetableManager userId={user?.id} onClose={() => { setShowTimetableForm(false); fetchContent(); }} />
+              </div>
+            )}
+            {!showTimetableForm && (
+              <>
+                {timetables.length === 0 ? (
+                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+                    <Clock className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                    <p className="text-gray-400 text-lg">No classes scheduled</p>
+                    <p className="text-gray-500 mt-2">Click "Add Class" to create your timetable</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {DAYS.map((day) => {
+                      const dayClasses = timetables.filter((t) => t.day_of_week === day).sort((a, b) => a.start_time.localeCompare(b.start_time));
+                      if (dayClasses.length === 0) return null;
+                      return (
+                        <div key={day} className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all">
+                          <h3 className="text-lg font-bold text-indigo-400 mb-4 pb-3 border-b border-white/10">{day}</h3>
+                          <div className="space-y-3">
+                            {dayClasses.map((cls) => (
+                              <div key={cls.id} className="group flex items-start justify-between border-l-2 border-indigo-500 pl-4 py-2 hover:bg-white/5 rounded-r-lg transition-all">
+                                <div>
+                                  <p className="font-semibold text-white">{cls.title}</p>
+                                  {cls.subject && <p className="text-sm text-gray-400">{cls.subject}</p>}
+                                  <p className="text-xs text-indigo-400 mt-1">{cls.start_time} - {cls.end_time}</p>
+                                </div>
+                                <button
+                                  onClick={async () => {
+                                    if (confirm('Delete this class?')) {
+                                      await supabase.from('timetables').delete().eq('id', cls.id);
+                                      fetchContent();
+                                    }
+                                  }}
+                                  className="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        );
+
+      case 'quizzes':
+        return (
+          <div key="quizzes" className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+            <QuizBuilder userId={user?.id} onClose={() => setShowQuizBuilder(false)} />
+          </div>
+        );
+
+      case 'students':
+        return user ? (
+          <div key="students" className="space-y-6">
+            <MyStudents teacherId={user.id} onStartChat={handleStartChat} />
+          </div>
+        ) : null;
+
+      case 'profile':
+        return (
+          <div key="profile" className="space-y-6">
+            <TeacherProfile userId={user?.id} onClose={() => setActiveTab('notes')} />
+          </div>
+        );
+
+      case 'messages':
+        return user ? (
+          <div key="messages" className="space-y-6">
+            <MessagingCenter
+              userId={user.id}
+              userRole="teacher"
+              userName={userProfile?.full_name || ''}
+              initialChatUserId={chatUserId}
+            />
+          </div>
+        ) : null;
+
+      case 'events':
+        return user ? (
+          <div key="events" className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+            <EventManager userRole="teacher" userId={user.id} userName={userProfile?.full_name} />
+          </div>
+        ) : null;
+
+      case 'notifications':
+        return (
+          <div key="notifications" className="space-y-4">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-bold text-white">All Notifications</h2>
+              {allNotifications.length > 0 && (
+                <button
+                  onClick={async () => {
+                    await supabase.from('notifications').update({ is_read: true }).neq('is_read', true);
+                    fetchNotifications();
+                  }}
+                  className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Mark all as read
+                </button>
+              )}
+            </div>
+            
+            {allNotifications.length === 0 ? (
+              <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+                <Bell className="w-16 h-16 text-gray-600 mx-auto mb-4" />
+                <p className="text-gray-400 text-lg">No notifications yet</p>
+                <p className="text-gray-500 text-sm mt-2">Notifications will appear here when you create content</p>
+              </div>
+            ) : (
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                {allNotifications.map((notif, idx) => (
+                  <div
+                    key={notif.id}
+                    onClick={async () => {
+                      if (!notif.is_read) {
+                        await supabase.from('notifications').update({ is_read: true }).eq('id', notif.id);
+                        fetchNotifications();
+                      }
+                    }}
+                    className={`relative overflow-hidden bg-white/5 backdrop-blur-xl rounded-2xl p-5 border transition-all hover:border-indigo-500/30 cursor-pointer animate-[fadeIn_0.3s_ease-out] ${
+                      notif.is_read ? 'border-white/5' : 'border-indigo-500/30 bg-indigo-500/5'
+                    }`}
+                    style={{ animationDelay: `${idx * 30}ms` }}
+                  >
+                    {!notif.is_read && (
+                      <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-500 to-purple-500" />
+                    )}
+                    <div className="flex items-start gap-4">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
+                        notif.type === 'note' ? 'bg-blue-500/20' :
+                        notif.type === 'assignment' ? 'bg-amber-500/20' :
+                        notif.type === 'class' ? 'bg-emerald-500/20' :
+                        notif.type === 'quiz' ? 'bg-purple-500/20' :
+                        'bg-gray-500/20'
+                      }`}>
+                        {notif.type === 'note' ? <FileText className="w-5 h-5 text-blue-400" /> :
+                         notif.type === 'assignment' ? <Calendar className="w-5 h-5 text-amber-400" /> :
+                         notif.type === 'class' ? <Clock className="w-5 h-5 text-emerald-400" /> :
+                         notif.type === 'quiz' ? <Brain className="w-5 h-5 text-purple-400" /> :
+                         <Bell className="w-5 h-5 text-gray-400" />}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="font-semibold text-white">{notif.title}</h4>
+                          {!notif.is_read && (
+                            <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0 animate-pulse mt-2" />
+                          )}
+                        </div>
+                        <p className="text-gray-400 text-sm mt-1 line-clamp-2">{notif.message}</p>
+                        <p className="text-gray-500 text-xs mt-2">
+                          {new Date(notif.created_at).toLocaleDateString('en-US', {
+                            weekday: 'short',
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+
+      default:
+        return null;
+    }
+  };
+
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
       {/* Notifications */}
@@ -287,8 +694,34 @@ export default function TeacherDashboard() {
         </div>
       )}
 
-      {/* Header */}
-      <header className="bg-white/5 backdrop-blur-xl border-b border-white/10 sticky top-0 z-40">
+      {/* Mobile Header - Visible only on small screens */}
+      <header className="bg-white/5 backdrop-blur-xl border-b border-white/10 sticky top-0 z-40 lg:hidden">
+        <div className="px-4 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-lg flex items-center justify-center shadow-lg">
+                <TrendingUp className="w-4 h-4 text-white" />
+              </div>
+              <div>
+                <h1 className="text-sm font-bold text-white">Teacher Portal</h1>
+                <p className="text-xs text-indigo-300">{userProfile?.full_name || 'Teacher'}</p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleLogout}
+                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
+              >
+                <LogOut className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </header>
+      
+      {/* Desktop Header - Hidden on mobile */}
+      <header className="bg-white/5 backdrop-blur-xl border-b border-white/10 sticky top-0 z-40 hidden lg:block">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
@@ -399,7 +832,7 @@ export default function TeacherDashboard() {
         </div>
       </header>
 
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-8 py-4 pb-24 md:pb-8">
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all group">
@@ -440,23 +873,13 @@ export default function TeacherDashboard() {
           </div>
         </div>
 
-        {/* Tabs */}
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+        {/* Tabs - Hidden on mobile */}
+        <div className="hidden lg:flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
           <div className="flex gap-2 bg-card/40 backdrop-blur-xl rounded-xl p-1 border border-border/50 overflow-x-auto">
-            {[
-{ id: 'notes', label: 'Notes', icon: FileText, count: activeNotes.length },
-  { id: 'assignments', label: 'Assignments', icon: Calendar, count: activeAssignments.length },
-  { id: 'timetable', label: 'Timetable', icon: Clock, count: timetables.length },
-  { id: 'quizzes', label: 'Quizzes', icon: Brain, count: null },
-  { id: 'students', label: 'My Students', icon: Users, count: null },
-  { id: 'messages', label: 'Messages', icon: MessageSquare, count: null },
-  { id: 'events', label: 'Events', icon: CalendarDays, count: null },
-  { id: 'notifications', label: 'Notifications', icon: Bell, count: unreadNotifCount > 0 ? unreadNotifCount : null },
-  { id: 'profile', label: 'Profile', icon: User, count: null },
-  ].map((tab) => (
+            {tabs.map((tab) => (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id as any)}
+                onClick={() => handleTabChange(tab.id)}
                 className={`flex items-center gap-2 px-4 py-2.5 rounded-lg font-medium transition-all whitespace-nowrap ${
                   activeTab === tab.id
                     ? 'bg-primary text-primary-foreground shadow-lg'
@@ -464,12 +887,12 @@ export default function TeacherDashboard() {
                 }`}
               >
                 <tab.icon className="w-4 h-4" />
-                <span className="hidden sm:inline">{tab.label}</span>
+                <span>{tab.label}</span>
                 {tab.count !== null && <span className={`px-2 py-0.5 rounded-full text-xs ${tab.id === 'notifications' && unreadNotifCount > 0 ? 'bg-red-500 text-white' : 'bg-white/20'}`}>{tab.count}</span>}
               </button>
             ))}
           </div>
-          {activeTab !== 'profile' && activeTab !== 'notifications' && activeTab !== 'students' && (
+          {activeTab !== 'profile' && activeTab !== 'notifications' && activeTab !== 'students' && activeTab !== 'messages' && activeTab !== 'events' && activeTab !== 'home' && (
             <button
               onClick={() => {
                 if (activeTab === 'notes') setShowNoteForm(true);
@@ -480,349 +903,34 @@ export default function TeacherDashboard() {
               className="flex items-center gap-2 bg-gradient-to-r from-primary to-accent text-primary-foreground px-5 py-2.5 rounded-xl font-semibold hover:opacity-90 transition-all shadow-lg shadow-primary/30"
             >
               <Plus className="w-5 h-5" />
-              <span className="hidden sm:inline">Add {activeTab === 'notes' ? 'Note' : activeTab === 'assignments' ? 'Assignment' : activeTab === 'timetable' ? 'Class' : 'Quiz'}</span>
+              <span>Add {activeTab === 'notes' ? 'Note' : activeTab === 'assignments' ? 'Assignment' : activeTab === 'timetable' ? 'Class' : 'Quiz'}</span>
             </button>
           )}
         </div>
 
+        {/* Mobile Bottom Navigation - Using centralized component */}
+        <div className="lg:hidden">
+          <DashboardTabNavigation 
+            tabs={tabs as any[]} 
+            activeTab={activeTab} 
+            onTabChange={(id) => handleTabChange(id)} 
+          />
+        </div>
+        
+        {/* Spacer for mobile bottom nav - adjust height based on DashboardTabNavigation */}
+        <div className="h-16 lg:hidden" />
+
         {/* Content */}
-        {activeTab === 'notes' && (
-          <div className="space-y-6">
-            {showNoteForm && (
-              <div className="animate-[fadeIn_0.3s_ease-out]">
-                <NotesManager userId={user?.id} onClose={() => { setShowNoteForm(false); fetchContent(); }} />
-              </div>
-            )}
-            {!showNoteForm && (
-              <>
-                {activeNotes.length === 0 ? (
-                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
-                    <FileText className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-lg">No active notes</p>
-                    <p className="text-gray-500 mt-2">Click "Add Note" to create your first note</p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {activeNotes.map((note, idx) => (
-                      <div
-                        key={note.id}
-                        className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all group animate-[fadeIn_0.3s_ease-out]"
-                        style={{ animationDelay: `${idx * 50}ms` }}
-                      >
-                        <div className="flex items-start justify-between mb-4">
-                          <h3 className="text-lg font-bold text-white group-hover:text-indigo-300 transition-colors">{note.title}</h3>
-                          <div className="flex gap-1">
-                            {note.file_url && (
-                              <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="p-2 text-indigo-400 hover:bg-indigo-500/20 rounded-lg transition-all">
-                                <Eye className="w-4 h-4" />
-                              </a>
-                            )}
-                            <button
-                              onClick={async () => {
-                                if (confirm('Delete this note permanently?')) {
-                                  await supabase.from('notes').delete().eq('id', note.id);
-                                  fetchContent();
-                                }
-                              }}
-                              className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </div>
-                        <p className="text-gray-400 text-sm mb-4 line-clamp-2">{note.description}</p>
-                        <div className="flex items-center justify-between text-xs text-gray-500">
-                          <span>{new Date(note.created_at).toLocaleDateString()}</span>
-                          {note.file_url && (
-                            <a href={note.file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1 text-indigo-400 hover:text-indigo-300">
-                              <Download className="w-3 h-3" />
-                              Download
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'assignments' && (
-          <div className="space-y-6">
-            {showAssignmentForm && (
-              <div className="animate-[fadeIn_0.3s_ease-out]">
-                <AssignmentsManager userId={user?.id} onClose={() => { setShowAssignmentForm(false); fetchContent(); }} />
-              </div>
-            )}
-            {!showAssignmentForm && (
-              <>
-                {(showArchived ? archivedAssignments : activeAssignments).length === 0 ? (
-                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
-                    <Calendar className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-lg">No {showArchived ? 'archived' : 'active'} assignments</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {(showArchived ? archivedAssignments : activeAssignments).map((assignment, idx) => {
-                      const dueDate = new Date(assignment.due_date);
-                      const isOverdue = dueDate < new Date() && !assignment.is_completed;
-                      const daysUntilDue = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-                      return (
-                        <div
-                          key={assignment.id}
-                          className={`bg-white/5 backdrop-blur-xl rounded-2xl p-6 border transition-all animate-[fadeIn_0.3s_ease-out] ${
-                            assignment.is_completed
-                              ? 'border-green-500/30 bg-green-500/5'
-                              : isOverdue
-                              ? 'border-red-500/30 bg-red-500/5'
-                              : 'border-white/10 hover:border-indigo-500/50'
-                          }`}
-                          style={{ animationDelay: `${idx * 50}ms` }}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                            <button
-                              onClick={() => toggleAssignmentComplete(assignment.id, assignment.is_completed)}
-                              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${
-                                assignment.is_completed
-                                  ? 'bg-green-500 border-green-500 text-white'
-                                  : 'border-gray-500 hover:border-indigo-500'
-                              }`}
-                            >
-                              {assignment.is_completed && <CheckCircle2 className="w-5 h-5" />}
-                            </button>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-3 mb-2">
-                                <h3 className={`text-lg font-bold ${assignment.is_completed ? 'text-green-400 line-through' : 'text-white'}`}>
-                                  {assignment.title}
-                                </h3>
-                                {isOverdue && (
-                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-1 rounded-full">OVERDUE</span>
-                                )}
-                                {assignment.is_completed && (
-                                  <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-1 rounded-full">COMPLETED</span>
-                                )}
-                              </div>
-                              <p className="text-gray-400 text-sm mb-3 line-clamp-2">{assignment.description}</p>
-                              <div className="flex flex-wrap items-center gap-4 text-sm">
-                                <span className={`font-medium ${isOverdue ? 'text-red-400' : 'text-indigo-400'}`}>
-                                  Due: {dueDate.toLocaleDateString()} {dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                                {!assignment.is_completed && !isOverdue && daysUntilDue <= 7 && (
-                                  <span className="text-amber-400">{daysUntilDue} days left</span>
-                                )}
-                                {assignment.github_repo_link && (
-                                  <a
-                                    href={assignment.github_repo_link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                    GitHub
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex gap-2 shrink-0">
-                              {!assignment.is_archived && (
-                                <button onClick={() => archiveAssignment(assignment.id)} className="p-2 text-amber-400 hover:bg-amber-500/20 rounded-lg transition-all">
-                                  <Archive className="w-5 h-5" />
-                                </button>
-                              )}
-                              <button
-                                onClick={async () => {
-                                  if (confirm('Delete this assignment permanently?')) {
-                                    await supabase.from('assignments').delete().eq('id', assignment.id);
-                                    fetchContent();
-                                  }
-                                }}
-                                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
-                              >
-                                <Trash2 className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'timetable' && (
-          <div className="space-y-6">
-            {showTimetableForm && (
-              <div className="animate-[fadeIn_0.3s_ease-out]">
-                <TimetableManager userId={user?.id} onClose={() => { setShowTimetableForm(false); fetchContent(); }} />
-              </div>
-            )}
-            {!showTimetableForm && (
-              <>
-                {timetables.length === 0 ? (
-                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
-                    <Clock className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-lg">No classes scheduled</p>
-                    <p className="text-gray-500 mt-2">Click "Add Class" to create your timetable</p>
-                  </div>
-                ) : (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {DAYS.map((day) => {
-                      const dayClasses = timetables.filter((t) => t.day_of_week === day).sort((a, b) => a.start_time.localeCompare(b.start_time));
-                      if (dayClasses.length === 0) return null;
-                      return (
-                        <div key={day} className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all">
-                          <h3 className="text-lg font-bold text-indigo-400 mb-4 pb-3 border-b border-white/10">{day}</h3>
-                          <div className="space-y-3">
-                            {dayClasses.map((cls) => (
-                              <div key={cls.id} className="group flex items-start justify-between border-l-2 border-indigo-500 pl-4 py-2 hover:bg-white/5 rounded-r-lg transition-all">
-                                <div>
-                                  <p className="font-semibold text-white">{cls.title}</p>
-                                  {cls.subject && <p className="text-sm text-gray-400">{cls.subject}</p>}
-                                  <p className="text-xs text-indigo-400 mt-1">{cls.start_time} - {cls.end_time}</p>
-                                </div>
-                                <button
-                                  onClick={async () => {
-                                    if (confirm('Delete this class?')) {
-                                      await supabase.from('timetables').delete().eq('id', cls.id);
-                                      fetchContent();
-                                    }
-                                  }}
-                                  className="opacity-0 group-hover:opacity-100 p-1 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'quizzes' && (
-          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            <QuizBuilder userId={user?.id} onClose={() => setShowQuizBuilder(false)} />
-          </div>
-        )}
-
-        {activeTab === 'students' && user && (
-          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            <MyStudents teacherId={user.id} onStartChat={handleStartChat} />
-          </div>
-        )}
-
-{activeTab === 'profile' && (
-  <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-  <TeacherProfile userId={user?.id} onClose={() => setActiveTab('notes')} />
-  </div>
-  )}
-
-  {activeTab === 'messages' && user && (
-    <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-      <MessagingCenter
-        userId={user.id}
-        userRole="teacher"
-        userName={userProfile?.full_name || ''}
-        initialChatUserId={chatUserId}
-      />
-    </div>
-  )}
-
-  {activeTab === 'events' && user && (
-    <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-      <EventManager userRole="teacher" userId={user.id} userName={userProfile?.full_name} />
-    </div>
-  )}
-  
-  {activeTab === 'notifications' && (
-          <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-white">All Notifications</h2>
-              {allNotifications.length > 0 && (
-                <button
-                  onClick={async () => {
-                    await supabase.from('notifications').update({ is_read: true }).neq('is_read', true);
-                    fetchNotifications();
-                  }}
-                  className="text-sm text-indigo-400 hover:text-indigo-300 transition-colors"
-                >
-                  Mark all as read
-                </button>
-              )}
-            </div>
-            
-            {allNotifications.length === 0 ? (
-              <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
-                <Bell className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                <p className="text-gray-400 text-lg">No notifications yet</p>
-                <p className="text-gray-500 text-sm mt-2">Notifications will appear here when you create content</p>
-              </div>
-            ) : (
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-                {allNotifications.map((notif, idx) => (
-                  <div
-                    key={notif.id}
-                    className={`relative overflow-hidden bg-white/5 backdrop-blur-xl rounded-2xl p-5 border transition-all hover:border-indigo-500/30 animate-[fadeIn_0.3s_ease-out] ${
-                      notif.is_read ? 'border-white/5' : 'border-indigo-500/30 bg-indigo-500/5'
-                    }`}
-                    style={{ animationDelay: `${idx * 30}ms` }}
-                  >
-                    {!notif.is_read && (
-                      <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-indigo-500 to-purple-500" />
-                    )}
-                    <div className="flex items-start gap-4">
-                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                        notif.type === 'note' ? 'bg-blue-500/20' :
-                        notif.type === 'assignment' ? 'bg-amber-500/20' :
-                        notif.type === 'class' ? 'bg-emerald-500/20' :
-                        notif.type === 'quiz' ? 'bg-purple-500/20' :
-                        'bg-gray-500/20'
-                      }`}>
-                        {notif.type === 'note' ? <FileText className="w-5 h-5 text-blue-400" /> :
-                         notif.type === 'assignment' ? <Calendar className="w-5 h-5 text-amber-400" /> :
-                         notif.type === 'class' ? <Clock className="w-5 h-5 text-emerald-400" /> :
-                         notif.type === 'quiz' ? <Brain className="w-5 h-5 text-purple-400" /> :
-                         <Bell className="w-5 h-5 text-gray-400" />}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="font-semibold text-white">{notif.title}</h4>
-                          {!notif.is_read && (
-                            <span className="w-2 h-2 bg-indigo-500 rounded-full flex-shrink-0 animate-pulse mt-2" />
-                          )}
-                        </div>
-                        <p className="text-gray-400 text-sm mt-1 line-clamp-2">{notif.message}</p>
-                        <p className="text-gray-500 text-xs mt-2">
-                          {new Date(notif.created_at).toLocaleDateString('en-US', {
-                            weekday: 'short',
-                            month: 'short',
-                            day: 'numeric',
-                            hour: '2-digit',
-                            minute: '2-digit'
-                          })}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
+        {renderContent()}
       </div>
 
-      {/* Mobile Navigation */}
-      <MobileNavigation role="teacher" unreadNotifications={unreadNotifCount} />
+      {/* Floating Action Button for Mobile */}
+      <FloatingActionMenu 
+        onAddNote={() => { setActiveTab('notes'); setShowNoteForm(true); }}
+        onAddAssignment={() => { setActiveTab('assignments'); setShowAssignmentForm(true); }}
+      />
+      
+      <div className="h-20 lg:hidden" />
 
       <style jsx>{`
         @keyframes slideIn {

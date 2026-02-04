@@ -31,7 +31,7 @@ interface QuizQuestion {
   question_type: 'multiple_choice' | 'true_false' | 'short_answer';
   options: string[];
   correct_answer: string;
-  points: number;
+  marks: number;
   order_index: number;
 }
 
@@ -39,7 +39,7 @@ interface Quiz {
   id: string;
   title: string;
   description: string;
-  time_limit_minutes: number | null;
+  duration_minutes: number | null;
   points_per_question: number;
   is_published: boolean;
   scheduled_start: string | null;
@@ -65,9 +65,24 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
   const [score, setScore] = useState(0);
   const [showResult, setShowResult] = useState(false);
   const [attemptId, setAttemptId] = useState<string | null>(null);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
+  // Check authentication first
   useEffect(() => {
-    loadQuiz();
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        alert('Please log in to access quizzes.');
+        onExit();
+        return;
+      }
+      
+      setCurrentUserId(session.user.id);
+      loadQuiz();
+    }
+    
+    checkSession();
   }, [quizId]);
 
   useEffect(() => {
@@ -88,55 +103,96 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
 
   async function loadQuiz() {
     try {
-      const { data: quizData } = await supabase
+      const { data: quizData, error: quizError } = await supabase
         .from('quizzes')
         .select('*')
         .eq('id', quizId)
         .single();
 
-      if (quizData) {
-        setQuiz(quizData);
-        if (quizData.time_limit_minutes) {
-          setTimeRemaining(quizData.time_limit_minutes * 60);
-        }
+      if (quizError) {
+        console.error('Error loading quiz:', quizError);
+        alert('Failed to load quiz. Please try again.');
+        onExit();
+        return;
       }
 
-      const { data: questionsData } = await supabase
+      if (quizData) {
+        setQuiz(quizData);
+        if (quizData.duration_minutes) {
+          setTimeRemaining(quizData.duration_minutes * 60);
+        }
+      } else {
+        alert('Quiz not found.');
+        onExit();
+        return;
+      }
+
+      const { data: questionsData, error: questionsError } = await supabase
         .from('quiz_questions')
         .select('*')
         .eq('quiz_id', quizId)
-        .order('order_index', { ascending: true });
+        .order('order_index', { ascending: true});
 
-      if (questionsData) {
-        setQuestions(questionsData);
+      if (questionsError) {
+        console.error('Error loading questions:', questionsError);
+        alert('Failed to load quiz questions. Please try again.');
+        onExit();
+        return;
       }
 
-      setQuizState('ready');
+      if (questionsData && questionsData.length > 0) {
+        setQuestions(questionsData);
+        setQuizState('ready');
+      } else {
+        alert('This quiz has no questions yet. Please contact your teacher.');
+        onExit();
+        return;
+      }
     } catch (err) {
       console.error('Error loading quiz:', err);
+      alert('An unexpected error occurred. Please try again.');
+      onExit();
     } finally {
       setLoading(false);
     }
   }
 
   async function startQuiz() {
-    // Create attempt record
-    const { data: attempt } = await supabase
-      .from('quiz_attempts')
-      .insert([{
-        quiz_id: quizId,
-        student_name: studentName,
-        started_at: new Date().toISOString(),
-        completed: false
-      }])
-      .select()
-      .single();
+    try {
+      if (!currentUserId) {
+        alert('Session expired. Please log in again.');
+        onExit();
+        return;
+      }
 
-    if (attempt) {
-      setAttemptId(attempt.id);
+      // Create attempt record with student_id
+      const { data: attempt, error } = await supabase
+        .from('quiz_attempts')
+        .insert([{
+          quiz_id: quizId,
+          student_id: currentUserId,
+          student_name: studentName,
+          started_at: new Date().toISOString(),
+          completed: false,
+          status: 'in_progress'
+        }])
+        .select()
+        .single();
+
+      if (error) {
+        console.error('Error creating quiz attempt:', error);
+        alert('Failed to start quiz. Please try again.');
+        return;
+      }
+
+      if (attempt) {
+        setAttemptId(attempt.id);
+        setQuizState('playing');
+      }
+    } catch (err) {
+      console.error('Error starting quiz:', err);
+      alert('An unexpected error occurred. Please try again.');
     }
-
-    setQuizState('playing');
   }
 
   function selectAnswer(questionId: string, answer: string) {
@@ -160,7 +216,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
     
     // Calculate score
     let totalScore = 0;
-    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+    const totalPoints = questions.reduce((sum, q) => sum + q.marks, 0);
 
     for (const question of questions) {
       const userAnswer = answers[question.id];
@@ -170,7 +226,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
           : userAnswer === question.correct_answer;
         
         if (isCorrect) {
-          totalScore += question.points;
+          totalScore += question.marks;
         }
       }
     }
@@ -190,8 +246,8 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
           score: percentageScore,
           points_earned: totalScore,
           answers: answers,
-          time_taken_seconds: quiz?.time_limit_minutes 
-            ? (quiz.time_limit_minutes * 60) - (timeRemaining || 0)
+          time_taken_seconds: quiz?.duration_minutes 
+            ? (quiz.duration_minutes * 60) - (timeRemaining || 0)
             : null
         })
         .eq('id', attemptId);
@@ -295,13 +351,13 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
             </div>
             <div className="bg-white/5 rounded-xl p-4">
               <Trophy className="w-6 h-6 text-amber-400 mx-auto mb-2" />
-              <p className="text-2xl font-bold text-white">{questions.reduce((sum, q) => sum + q.points, 0)}</p>
+              <p className="text-2xl font-bold text-white">{questions.reduce((sum, q) => sum + q.marks, 0)}</p>
               <p className="text-sm text-gray-400">Total Points</p>
             </div>
-            {quiz.time_limit_minutes && (
+            {quiz.duration_minutes && (
               <div className="col-span-2 bg-white/5 rounded-xl p-4">
                 <Clock className="w-6 h-6 text-red-400 mx-auto mb-2" />
-                <p className="text-2xl font-bold text-white">{quiz.time_limit_minutes} minutes</p>
+                <p className="text-2xl font-bold text-white">{quiz.duration_minutes} minutes</p>
                 <p className="text-sm text-gray-400">Time Limit</p>
               </div>
             )}
@@ -329,7 +385,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
 
   // Completed state
   if (quizState === 'completed' && showResult) {
-    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
+    const totalPoints = questions.reduce((sum, q) => sum + q.marks, 0);
     const percentage = Math.round((score / totalPoints) * 100);
     const isPassing = percentage >= 70;
 
@@ -489,7 +545,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
                     )}
                     <div className="flex items-center gap-2 text-sm text-gray-400">
                       <Trophy className="w-4 h-4" />
-                      <span>{isCorrect ? question.points : 0} / {question.points} points</span>
+                      <span>{isCorrect ? question.marks : 0} / {question.marks} points</span>
                     </div>
                   </div>
                 </div>
@@ -553,7 +609,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
               </span>
               <span className="flex items-center gap-1 text-amber-400 text-sm font-medium">
                 <Trophy className="w-4 h-4" />
-                {currentQ.points} pts
+                {currentQ.marks} pts
               </span>
             </div>
 
@@ -565,7 +621,10 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
                 {currentQ.options.map((option, idx) => (
                   <button
                     key={idx}
-                    onClick={() => selectAnswer(currentQ.id, option)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectAnswer(currentQ.id, option);
+                    }}
                     className={`w-full text-left p-4 rounded-xl border-2 transition-all ${
                       answers[currentQ.id] === option
                         ? 'border-amber-500 bg-amber-500/10 text-white'
@@ -592,7 +651,10 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
                 {['True', 'False'].map((option) => (
                   <button
                     key={option}
-                    onClick={() => selectAnswer(currentQ.id, option)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      selectAnswer(currentQ.id, option);
+                    }}
                     className={`p-6 rounded-xl border-2 transition-all ${
                       answers[currentQ.id] === option
                         ? option === 'True'

@@ -4,7 +4,7 @@ import React from "react"
 
 import { useState } from 'react';
 import { createClient } from '@supabase/supabase-js';
-import { Upload, X, FileText, Loader } from 'lucide-react';
+import { Upload, X, FileText, Loader, Sparkles, CheckCircle2 } from 'lucide-react';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -22,6 +22,7 @@ export default function NotesManager({ onClose, userId }: NotesManagerProps) {
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
@@ -109,11 +110,14 @@ export default function NotesManager({ onClose, userId }: NotesManagerProps) {
         },
       ]);
 
-      // Reset form and close
-      setTitle('');
-      setDescription('');
-      setFile(null);
-      onClose();
+      // Show success and close
+      setSuccess(true);
+      setTimeout(() => {
+        setTitle('');
+        setDescription('');
+        setFile(null);
+        onClose();
+      }, 1500);
     } catch (err: any) {
       setError(err.message || 'Failed to upload note');
       console.error('Upload error:', err);
@@ -123,111 +127,144 @@ export default function NotesManager({ onClose, userId }: NotesManagerProps) {
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-8 mb-8 border-2 border-indigo-200">
-      <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Add New Note</h2>
-        <button
-          onClick={onClose}
-          className="text-gray-500 hover:text-gray-700 p-2 transition-colors"
-        >
-          <X className="w-6 h-6" />
-        </button>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-800 text-sm font-medium">{error}</p>
-        </div>
-      )}
-
-      <form onSubmit={handleSubmit} className="space-y-6">
-        <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Note Title
-          </label>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            placeholder="e.g., Chapter 1 - Introduction"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-          />
-        </div>
-
-        <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Description
-          </label>
-          <textarea
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="Brief description of the notes"
-            rows={3}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-          />
-        </div>
-
-        <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Upload File (PDF or DOCX)
-          </label>
-          <div className="border-2 border-dashed border-indigo-300 rounded-lg p-8 text-center hover:border-indigo-500 transition-colors cursor-pointer relative">
-            <input
-              type="file"
-              onChange={handleFileChange}
-              accept=".pdf,.doc,.docx"
-              className="absolute inset-0 opacity-0 cursor-pointer"
-            />
-            <div className="pointer-events-none">
-              <Upload className="w-12 h-12 text-indigo-400 mx-auto mb-2" />
-              {file ? (
-                <div>
-                  <p className="font-semibold text-gray-900">{file.name}</p>
-                  <p className="text-sm text-gray-600">
-                    {(file.size / 1024 / 1024).toFixed(2)} MB
-                  </p>
-                </div>
-              ) : (
-                <div>
-                  <p className="font-semibold text-gray-900">
-                    Click to upload or drag and drop
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    PDF or DOCX (max 10MB)
-                  </p>
-                </div>
-              )}
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
+      <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl shadow-2xl w-full max-w-2xl border border-white/10 max-h-[90vh] overflow-y-auto">
+        {/* Header */}
+        <div className="sticky top-0 bg-gradient-to-r from-indigo-600/20 to-purple-600/20 backdrop-blur-xl border-b border-white/10 p-4 sm:p-6">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 sm:w-12 sm:h-12 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-xl flex items-center justify-center shadow-lg">
+                <FileText className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+              </div>
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold text-white">Add New Note</h2>
+                <p className="text-xs sm:text-sm text-indigo-300">Share study materials with students</p>
+              </div>
             </div>
+            <button
+              onClick={onClose}
+              className="p-2 text-gray-400 hover:text-white hover:bg-white/10 rounded-lg transition-all"
+            >
+              <X className="w-5 h-5 sm:w-6 sm:h-6" />
+            </button>
           </div>
         </div>
 
-        <div className="flex gap-4">
-          <button
-            type="submit"
-            disabled={loading}
-            className="flex-1 bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-          >
-            {loading ? (
-              <>
-                <Loader className="w-5 h-5 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              <>
-                <Upload className="w-5 h-5" />
-                Upload Note
-              </>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-6 bg-gray-300 text-gray-900 font-semibold py-3 rounded-lg hover:bg-gray-400 transition-colors"
-          >
-            Cancel
-          </button>
-        </div>
-      </form>
+        {/* Success Message */}
+        {success && (
+          <div className="mx-4 sm:mx-6 mt-4 sm:mt-6 bg-gradient-to-r from-emerald-500/20 to-green-500/20 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3 animate-[slideIn_0.3s_ease-out]">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />
+            <p className="text-emerald-400 font-medium">Note uploaded successfully!</p>
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="mx-4 sm:mx-6 mt-4 sm:mt-6 bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+            <p className="text-red-400 text-sm font-medium">{error}</p>
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-4 sm:space-y-6">
+          {/* Title Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Note Title <span className="text-red-400">*</span>
+            </label>
+            <input
+              type="text"
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g., Chapter 1 - Introduction to Physics"
+              className="w-full px-4 py-3 sm:py-3.5 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all"
+            />
+          </div>
+
+          {/* Description Input */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Description <span className="text-red-400">*</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="Brief description of the study material..."
+              rows={3}
+              className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 transition-all resize-none"
+            />
+          </div>
+
+          {/* File Upload */}
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Upload File (PDF or DOCX) <span className="text-red-400">*</span>
+            </label>
+            <div className="relative border-2 border-dashed border-indigo-500/30 rounded-xl p-6 sm:p-8 text-center hover:border-indigo-500/50 transition-all cursor-pointer bg-gradient-to-br from-indigo-500/5 to-purple-500/5">
+              <input
+                type="file"
+                onChange={handleFileChange}
+                accept=".pdf,.doc,.docx"
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+              <div className="pointer-events-none">
+                <Upload className="w-10 h-10 sm:w-12 sm:h-12 text-indigo-400 mx-auto mb-3" />
+                {file ? (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-white text-sm sm:text-base">{file.name}</p>
+                    <p className="text-xs sm:text-sm text-gray-400">
+                      {(file.size / 1024 / 1024).toFixed(2)} MB
+                    </p>
+                    <p className="text-xs text-indigo-400 mt-2">Click to change file</p>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    <p className="font-semibold text-white text-sm sm:text-base">
+                      Click to upload or drag and drop
+                    </p>
+                    <p className="text-xs sm:text-sm text-gray-400">
+                      PDF or DOCX (max 10MB)
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 pt-4 border-t border-white/10">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full sm:w-auto px-6 py-3 sm:py-3.5 bg-white/10 text-white font-semibold rounded-xl hover:bg-white/20 transition-all order-2 sm:order-1"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={loading || success}
+              className="w-full sm:flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold py-3 sm:py-3.5 rounded-xl hover:opacity-90 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/25 order-1 sm:order-2"
+            >
+              {loading ? (
+                <>
+                  <Loader className="w-5 h-5 animate-spin" />
+                  Uploading...
+                </>
+              ) : success ? (
+                <>
+                  <CheckCircle2 className="w-5 h-5" />
+                  Uploaded!
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-5 h-5" />
+                  Upload Note
+                </>
+              )}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   );
 }

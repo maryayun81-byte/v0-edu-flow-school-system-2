@@ -45,6 +45,8 @@ interface ContactUser {
   avatar_url?: string;
   role: string;
   subject?: string;
+  class?: string;
+  shared_subjects?: string[];
 }
 
 export function MessagingCenter({ userId, userRole, userName, initialChatUserId }: MessagingCenterProps) {
@@ -63,26 +65,80 @@ export function MessagingCenter({ userId, userRole, userName, initialChatUserId 
     }
   }, [initialChatUserId]);
 
-  // Fetch available contacts based on role
+  // Fetch available contacts based on role using database functions
   useEffect(() => {
     async function fetchContacts() {
       setLoadingContacts(true);
       try {
-        let query = supabase.from("profiles").select("id, full_name, avatar_url, role, subject");
+        let contacts: ContactUser[] = [];
 
         if (userRole === "student") {
-          // Students can only message their teachers
-          query = query.eq("role", "teacher");
+          // Get teachers student can message
+          const { data: teachers, error: teachersError } = await supabase
+            .rpc('get_student_messageable_teachers', { student_id: userId });
+          
+          if (teachersError) {
+            console.error('Error fetching teachers:', teachersError);
+          }
+
+          // Get classmates student can message
+          const { data: classmates, error: classmatesError } = await supabase
+            .rpc('get_student_messageable_classmates', { student_id: userId });
+          
+          if (classmatesError) {
+            console.error('Error fetching classmates:', classmatesError);
+          }
+
+          contacts = [
+            ...(teachers || []).map((t: any) => ({
+              id: t.teacher_id,
+              full_name: t.teacher_name,
+              role: 'teacher',
+              subject: t.teacher_subject,
+              class: 'Your class'
+            })),
+            ...(classmates || []).map((c: any) => ({
+              id: c.classmate_id,
+              full_name: c.classmate_name,
+              role: 'student',
+              shared_subjects: c.shared_subjects
+            }))
+          ];
         } else if (userRole === "teacher") {
-          // Teachers can message their students
-          query = query.in("role", ["student", "teacher"]);
+          // Get students teacher can message
+          const { data: students, error } = await supabase
+            .rpc('get_teacher_messageable_students', { teacher_id: userId });
+          
+          if (error) {
+            console.error('Error fetching students:', error);
+          }
+
+          contacts = (students || []).map((s: any) => ({
+            id: s.student_id,
+            full_name: s.student_name,
+            role: 'student',
+            class: s.student_class,
+            shared_subjects: s.shared_subjects
+          }));
         } else {
-          // Admins can message anyone
-          query = query.in("role", ["student", "teacher"]);
+          // Admin can message anyone
+          const { data: allUsers } = await supabase
+            .from("profiles")
+            .select("id, full_name, avatar_url, role, subject, form_class")
+            .in("role", ["student", "teacher"])
+            .neq("id", userId);
+
+          contacts = (allUsers || []).map((u: any) => ({
+            id: u.id,
+            full_name: u.full_name,
+            avatar_url: u.avatar_url,
+            role: u.role,
+            subject: u.subject,
+            class: u.form_class
+          }));
         }
 
-        const { data } = await query.neq("id", userId);
-        setAvailableContacts(data || []);
+        setAvailableContacts(contacts);
       } catch (error) {
         console.error("Error fetching contacts:", error);
       } finally {
@@ -114,10 +170,17 @@ export function MessagingCenter({ userId, userRole, userName, initialChatUserId 
   });
 
   async function handleStartChat(contactId: string) {
-    const convId = await startDirectConversation(contactId);
-    if (convId) {
-      setActiveConversation(convId);
-      setShowNewChat(false);
+    try {
+      const convId = await startDirectConversation(contactId);
+      if (convId) {
+        setActiveConversation(convId);
+        setShowNewChat(false);
+      } else {
+        alert('Failed to start conversation. You may not have permission to message this user.');
+      }
+    } catch (err: any) {
+      console.error('Error starting chat:', err);
+      alert(err.message || 'Failed to start conversation. Please try again.');
     }
   }
 
@@ -219,26 +282,56 @@ export function MessagingCenter({ userId, userRole, userName, initialChatUserId 
               <ChatListSkeleton />
             ) : (
               <div className="space-y-2">
-                {availableContacts.map((contact) => (
-                  <button
-                    key={contact.id}
-                    onClick={() => handleStartChat(contact.id)}
-                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted/50 transition-colors"
-                  >
-                    <Avatar className="w-12 h-12">
-                      <AvatarImage src={contact.avatar_url || "/placeholder.svg"} />
-                      <AvatarFallback className="bg-primary/10 text-primary">
-                        {contact.full_name?.charAt(0)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="flex-1 text-left">
-                      <p className="font-medium text-foreground">{contact.full_name}</p>
-                      <p className="text-sm text-muted-foreground capitalize">
-                        {contact.role} {contact.subject && `- ${contact.subject}`}
-                      </p>
-                    </div>
-                  </button>
-                ))}
+                {availableContacts.length === 0 ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <Users className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                    <p className="text-sm font-medium">No contacts available</p>
+                    <p className="text-xs mt-1">
+                      {userRole === 'student' 
+                        ? "No teachers or classmates found for your subjects"
+                        : userRole === 'teacher'
+                        ? "No students found in your classes"
+                        : "No users available"}
+                    </p>
+                  </div>
+                ) : (
+                  availableContacts.map((contact) => (
+                    <button
+                      key={contact.id}
+                      onClick={() => handleStartChat(contact.id)}
+                      className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-muted/50 transition-colors"
+                    >
+                      <Avatar className="w-12 h-12">
+                        <AvatarImage src={contact.avatar_url || "/placeholder.svg"} />
+                        <AvatarFallback className="bg-primary/10 text-primary">
+                          {contact.full_name?.charAt(0)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div className="flex-1 text-left">
+                        <p className="font-medium text-foreground">{contact.full_name}</p>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <span className="capitalize">{contact.role}</span>
+                          {contact.class && <span>• {contact.class}</span>}
+                          {contact.subject && <span>• {contact.subject}</span>}
+                        </div>
+                        {contact.shared_subjects && contact.shared_subjects.length > 0 && (
+                          <div className="flex gap-1 mt-1.5 flex-wrap">
+                            {contact.shared_subjects.slice(0, 3).map((subj: string) => (
+                              <span key={subj} className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded">
+                                {subj}
+                              </span>
+                            ))}
+                            {contact.shared_subjects.length > 3 && (
+                              <span className="px-2 py-0.5 bg-muted text-muted-foreground text-xs rounded">
+                                +{contact.shared_subjects.length - 3}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </button>
+                  ))
+                )}
               </div>
             )}
           </div>

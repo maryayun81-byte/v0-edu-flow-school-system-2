@@ -80,64 +80,64 @@ export default function AssignmentsManager({ onClose, userId }: AssignmentsManag
   };
 
   return (
-    <div className="bg-white rounded-lg shadow-lg p-8 mb-8 border-2 border-indigo-200">
+    <div className="bg-white/5 backdrop-blur-xl rounded-2xl shadow-2xl p-8 mb-8 border border-white/10">
       <div className="flex items-center justify-between mb-6">
-        <h2 className="text-2xl font-bold text-gray-900">Add New Assignment</h2>
+        <h2 className="text-2xl font-bold text-white">Add New Assignment</h2>
         <button
           onClick={onClose}
-          className="text-gray-500 hover:text-gray-700 p-2 transition-colors"
+          className="text-gray-400 hover:text-white p-2 hover:bg-white/10 rounded-lg transition-all"
         >
           <X className="w-6 h-6" />
         </button>
       </div>
 
       {error && (
-        <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-          <p className="text-red-800 text-sm font-medium">{error}</p>
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4 mb-6">
+          <p className="text-red-400 text-sm font-medium">{error}</p>
         </div>
       )}
 
       <form onSubmit={handleSubmit} className="space-y-6">
         <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Assignment Title
+          <label className="block text-gray-300 font-semibold mb-2">
+            Assignment Title *
           </label>
           <input
             type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="e.g., Problem Set 1"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
           />
         </div>
 
         <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Description
+          <label className="block text-gray-300 font-semibold mb-2">
+            Description *
           </label>
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="Describe what students need to do"
-            rows={3}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            placeholder="Describe what students need to do..."
+            rows={4}
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all resize-none"
           />
         </div>
 
         <div>
-          <label className="block text-gray-700 font-semibold mb-2">
-            Due Date
+          <label className="block text-gray-300 font-semibold mb-2">
+            Due Date *
           </label>
           <input
             type="datetime-local"
             value={dueDate}
             onChange={(e) => setDueDate(e.target.value)}
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
           />
         </div>
 
         <div>
-          <label className="block text-gray-700 font-semibold mb-2">
+          <label className="block text-gray-300 font-semibold mb-2">
             GitHub Repository Link (Optional)
           </label>
           <input
@@ -145,15 +145,15 @@ export default function AssignmentsManager({ onClose, userId }: AssignmentsManag
             value={githubLink}
             onChange={(e) => setGithubLink(e.target.value)}
             placeholder="https://github.com/username/repo"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+            className="w-full px-4 py-3 bg-white/5 border border-white/10 rounded-xl text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
           />
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex gap-4 pt-4">
           <button
             type="submit"
             disabled={loading}
-            className="flex-1 bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+            className="flex-1 bg-gradient-to-r from-indigo-600 to-purple-600 text-white font-semibold py-3.5 rounded-xl hover:from-indigo-700 hover:to-purple-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-indigo-500/30"
           >
             {loading ? (
               <>
@@ -170,7 +170,7 @@ export default function AssignmentsManager({ onClose, userId }: AssignmentsManag
           <button
             type="button"
             onClick={onClose}
-            className="px-6 bg-gray-300 text-gray-900 font-semibold py-3 rounded-lg hover:bg-gray-400 transition-colors"
+            className="px-8 bg-white/10 text-white font-semibold py-3.5 rounded-xl hover:bg-white/20 transition-all border border-white/10"
           >
             Cancel
           </button>

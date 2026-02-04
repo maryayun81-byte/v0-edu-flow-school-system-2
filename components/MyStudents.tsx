@@ -108,33 +108,50 @@ export default function MyStudents({ teacherId, onStartChat }: MyStudentsProps) 
       return;
     }
 
-    // Get all form levels the teacher is assigned to
-    const formLevels = [...new Set(teacherAssignments.map((a) => a.form_level).filter(Boolean))];
+    // Get all class names the teacher is assigned to
+    // We use class_name because profiles.form_class stores the Class Name (e.g., "Form 1 East")
+    const classNames = [...new Set(teacherAssignments.map((a) => a.class_name).filter(Boolean))];
     
     // Get all subjects the teacher teaches
     const teacherSubjects = [...new Set(teacherAssignments.flatMap((a) => a.subjects))];
 
-    if (formLevels.length === 0 || teacherSubjects.length === 0) {
+    console.log("Fetching students for classes:", classNames);
+
+    if (classNames.length === 0 || teacherSubjects.length === 0) {
       setStudents([]);
       return;
     }
 
-    // Fetch all students in the teacher's assigned form levels
+    // Fetch all students in the teacher's assigned classes
+    // Fixed: Using class_name instead of form_level
     const { data: studentsData } = await supabase
       .from("profiles")
       .select("*")
       .eq("role", "student")
-      .eq("profile_completed", true)
-      .in("form_class", formLevels);
+      .in("form_class", classNames);
+      // Removed .eq("profile_completed", true) to ensure we see all enrolled students even if incomplete profile
 
     if (studentsData) {
-      // Filter students who have at least one subject that the teacher teaches
-      // This implements: Student ∈ AssignedClass AND StudentHas(TeacherSubject)
+      console.log("Found students:", studentsData.length);
+      
+      // Filter students who have at least one subject that the teacher teaches.
+      // If a student has NO subjects assigned yet, we might still want to show them 
+      // if they are in the class, but maybe mark them as "No subjects selected".
+      // However, the requirement says "enrolled in the subject", so we keep the filter.
+      
+      // Improved matching: Case insensitive and trimming
       const eligibleStudents = studentsData.filter((student) => {
-        const studentSubjects = student.subjects || [];
-        return studentSubjects.some((subject: string) => teacherSubjects.includes(subject));
+        const studentSubjects = (student.subjects || []).map((s: string) => s.trim());
+        const targetSubjects = teacherSubjects.map(s => s.trim());
+        
+        // Check intersection
+        const hasSubject = studentSubjects.some((subject: string) => targetSubjects.includes(subject));
+        
+        // Also include if the teacher teaches "All" or if system is class-based without subjects (optional check)
+        return hasSubject;
       });
 
+      console.log("Eligible students after subject filter:", eligibleStudents.length);
       setStudents(eligibleStudents);
     }
   }

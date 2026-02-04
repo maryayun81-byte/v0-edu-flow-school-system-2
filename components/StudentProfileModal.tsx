@@ -134,8 +134,28 @@ export default function StudentProfileModal({
         return;
       }
 
-      // Apply the selected theme
       setTheme(selectedTheme);
+
+      // Also save to student_subjects table for consistency
+      if (userId && subjectNames.length > 0) {
+        const subjectsToInsert = subjectNames
+          .filter(Boolean)
+          .map(name => ({
+            student_id: userId,
+            subject_name: name,
+          }));
+
+        if (subjectsToInsert.length > 0) {
+          const { error: subjectsError } = await supabase
+            .from("student_subjects")
+            .upsert(subjectsToInsert, { onConflict: 'student_id,subject_name' });
+            
+          if (subjectsError) {
+            console.error("Error saving subjects to table:", subjectsError);
+            // Don't block completion if this fails, but log it
+          }
+        }
+      }
       
       onComplete();
     } catch (err) {

@@ -44,42 +44,45 @@ interface NavItem {
 
 const studentNavItems: NavItem[] = [
   { icon: <Home className="h-5 w-5" />, label: "Home", href: "/student/dashboard" },
-  { icon: <BookOpen className="h-5 w-5" />, label: "Notes", href: "/student/dashboard?tab=notes" },
-  { icon: <Calendar className="h-5 w-5" />, label: "Schedule", href: "/student/dashboard?tab=timetable" },
-  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/dashboard?tab=quizzes" },
-  { icon: <User className="h-5 w-5" />, label: "Profile", href: "/student/dashboard?tab=profile" },
+  { icon: <BookOpen className="h-5 w-5" />, label: "Notes", href: "/student/notes" },
+  { icon: <Calendar className="h-5 w-5" />, label: "Schedule", href: "/student/schedule" },
+  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/quizzes" },
+  { icon: <User className="h-5 w-5" />, label: "Profile", href: "/student/profile" },
 ]
 
 const teacherNavItems: NavItem[] = [
   { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/teacher/dashboard" },
-  { icon: <FileText className="h-5 w-5" />, label: "Notes", href: "/teacher/dashboard?tab=notes" },
-  { icon: <ClipboardList className="h-5 w-5" />, label: "Assignments", href: "/teacher/dashboard?tab=assignments" },
-  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/teacher/dashboard?tab=quizzes" },
-  { icon: <Users className="h-5 w-5" />, label: "Students", href: "/teacher/dashboard?tab=students" },
+  { icon: <FileText className="h-5 w-5" />, label: "Notes", href: "/teacher/notes" },
+  { icon: <ClipboardList className="h-5 w-5" />, label: "Assignments", href: "/teacher/assignments" },
+  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/teacher/quizzes" },
+  { icon: <Users className="h-5 w-5" />, label: "Students", href: "/teacher/students" },
 ]
 
 const adminNavItems: NavItem[] = [
   { icon: <LayoutDashboard className="h-5 w-5" />, label: "Dashboard", href: "/admin/dashboard" },
-  { icon: <Users className="h-5 w-5" />, label: "Teachers", href: "/admin/dashboard?tab=teachers" },
-  { icon: <GraduationCap className="h-5 w-5" />, label: "Students", href: "/admin/dashboard?tab=students" },
-  { icon: <BookOpen className="h-5 w-5" />, label: "Classes", href: "/admin/dashboard?tab=classes" },
-  { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/admin/dashboard?tab=settings" },
+  { icon: <Users className="h-5 w-5" />, label: "Teachers", href: "/admin/teachers" },
+  { icon: <GraduationCap className="h-5 w-5" />, label: "Students", href: "/admin/students" },
+  { icon: <BookOpen className="h-5 w-5" />, label: "Classes", href: "/admin/classes" },
+  { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/admin/settings" },
 ]
 
 const moreMenuItems = {
   student: [
-    { icon: <FileText className="h-5 w-5" />, label: "Assignments", href: "/student/dashboard?tab=assignments" },
-    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/student/dashboard?tab=notifications" },
-    { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/student/dashboard?tab=settings" },
+    { icon: <FileText className="h-5 w-5" />, label: "Assignments", href: "/student/assignments" },
+    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/student/messages" },
+    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/student/notifications" },
+    { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/student/settings" },
   ],
   teacher: [
-    { icon: <Calendar className="h-5 w-5" />, label: "Timetable", href: "/teacher/dashboard?tab=timetable" },
-    { icon: <User className="h-5 w-5" />, label: "Profile", href: "/teacher/dashboard?tab=profile" },
-    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/teacher/dashboard?tab=notifications" },
+    { icon: <Calendar className="h-5 w-5" />, label: "Timetable", href: "/teacher/timetable" },
+    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/teacher/messages" },
+    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/teacher/notifications" },
+    { icon: <User className="h-5 w-5" />, label: "Profile", href: "/teacher/profile" },
   ],
   admin: [
-    { icon: <FileText className="h-5 w-5" />, label: "Reports", href: "/admin/dashboard?tab=reports" },
-    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/admin/dashboard?tab=notifications" },
+    { icon: <FileText className="h-5 w-5" />, label: "Reports", href: "/admin/reports" },
+    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/admin/messages" },
+    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/admin/notifications" },
   ],
 }
 
@@ -119,12 +122,6 @@ export function MobileNavigation({ role, unreadNotifications = 0 }: MobileNaviga
   const extraItems = moreMenuItems[role]
 
   const isActive = (href: string) => {
-    if (href.includes('?tab=')) {
-      const [basePath, query] = href.split('?')
-      const tabParam = new URLSearchParams(query).get('tab')
-      const currentUrl = typeof window !== 'undefined' ? window.location.href : ''
-      return currentUrl.includes(`tab=${tabParam}`)
-    }
     return pathname === href
   }
 

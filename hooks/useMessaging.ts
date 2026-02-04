@@ -166,49 +166,29 @@ export function useMessaging(userId: string) {
 
   const startDirectConversation = useCallback(async (otherUserId: string) => {
     try {
-      // Check if conversation already exists
-      const { data: existing } = await supabase
-        .from("conversation_participants")
-        .select(`
-          conversation_id,
-          conversations!inner (type)
-        `)
-        .eq("user_id", userId);
+      // Use database function to get or create conversation
+      // This ensures no duplicates and validates messaging permissions
+      const { data: convId, error } = await supabase
+        .rpc('get_or_create_conversation', { 
+          user1_id: userId, 
+          user2_id: otherUserId 
+        });
 
-      if (existing) {
-        for (const p of existing) {
-          const { data: otherParticipant } = await supabase
-            .from("conversation_participants")
-            .select("user_id")
-            .eq("conversation_id", p.conversation_id)
-            .eq("user_id", otherUserId)
-            .single();
-
-          if (otherParticipant && (p as any).conversations.type === "direct") {
-            return p.conversation_id;
-          }
+      if (error) {
+        console.error('Error creating conversation:', error);
+        // Check if it's a permission error
+        if (error.message?.includes('not allowed')) {
+          throw new Error('You do not have permission to message this user.');
         }
+        throw error;
       }
 
-      // Create new conversation
-      const { data: newConv, error: convError } = await supabase
-        .from("conversations")
-        .insert({ type: "direct", created_by: userId })
-        .select()
-        .single();
-
-      if (convError) throw convError;
-
-      // Add participants
-      await supabase.from("conversation_participants").insert([
-        { conversation_id: newConv.id, user_id: userId },
-        { conversation_id: newConv.id, user_id: otherUserId },
-      ]);
-
+      // Refresh conversations list to include the new/existing conversation
       await fetchConversations();
-      return newConv.id;
+      return convId;
     } catch (err: any) {
-      setError(err.message);
+      console.error('Error in startDirectConversation:', err);
+      setError(err.message || 'Failed to start conversation');
       return null;
     }
   }, [userId, fetchConversations]);
