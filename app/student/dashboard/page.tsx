@@ -41,6 +41,9 @@ import TuitionManager from "@/components/TuitionManager";
 import StudentSettings from "@/components/StudentSettings";
 import MessagingCenter from "@/components/MessagingCenter";
 import { StudentDashboardSkeleton } from "@/components/DashboardSkeleton";
+import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
+import StudentResults from "@/components/StudentResults";
+
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -130,6 +133,9 @@ export default function StudentDashboard() {
     "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications"
   >("overview");
   const [searchQuery, setSearchQuery] = useState("");
+  const [transcripts, setTranscripts] = useState<any[]>([]);
+  const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
+  const [transcriptFilters, setTranscriptFilters] = useState({ year: "", term: "", exam: "" });
 
   useEffect(() => {
     // Auth is handled by layout.tsx - just load profile
@@ -253,6 +259,32 @@ export default function StudentDashboard() {
       setUnreadCount(prev => Math.max(0, prev - 1));
     }
   }
+
+  async function fetchTranscripts() {
+    if (!profile?.id) return;
+
+    const { data, error } = await supabase
+      .from("transcripts")
+      .select(`
+        *,
+        exams!inner(exam_name, academic_year, term, start_date, end_date)
+      `)
+      .eq("student_id", profile.id)
+      .eq("status", "Published")
+      .order("published_at", { ascending: false });
+
+    if (data) {
+      setTranscripts(data);
+    } else if (error) {
+      console.error("Error fetching transcripts:", error);
+    }
+  }
+
+  useEffect(() => {
+    if (profile && activeTab === "results") {
+      fetchTranscripts();
+    }
+  }, [profile, activeTab]);
 
   async function fetchContent(profileData?: any) {
     const currentProfile = profileData || profile;
@@ -1166,89 +1198,8 @@ export default function StudentDashboard() {
         )}
 
         {/* Results Tab */}
-        {activeTab === "results" && (
-          <div className="space-y-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-2xl font-bold text-foreground">My Results</h2>
-              <div className="bg-primary/10 text-primary px-4 py-1.5 rounded-full text-sm font-medium">
-                {quizResults.length} Quiz{quizResults.length !== 1 ? 'zes' : ''} Completed
-              </div>
-            </div>
-
-            {quizResults.length === 0 ? (
-              <div className="text-center py-20 bg-gradient-to-br from-card/50 to-accent/5 backdrop-blur-xl rounded-2xl border border-border/50">
-                <Trophy className="w-16 h-16 text-muted-foreground mx-auto mb-6 opacity-50" />
-                <p className="text-xl font-semibold text-foreground mb-2">No Results Yet</p>
-                <p className="text-muted-foreground max-w-sm mx-auto">
-                  Complete quizzes to see your results here. Your scores and teacher feedback will appear once graded.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {quizResults.map((result) => {
-                  const getGradeColor = (percentage: number) => {
-                    if (percentage >= 80) return "text-green-500 bg-green-500/10 border-green-500/30";
-                    if (percentage >= 60) return "text-blue-500 bg-blue-500/10 border-blue-500/30";
-                    if (percentage >= 40) return "text-amber-500 bg-amber-500/10 border-amber-500/30";
-                    return "text-destructive bg-destructive/10 border-destructive/30";
-                  };
-
-                  return (
-                    <div
-                      key={result.id}
-                      className="bg-card border border-border/50 rounded-xl p-6 hover:border-primary/50 transition-all"
-                    >
-                      <div className="flex items-start justify-between gap-4 mb-4">
-                        <div className="flex-1">
-                          <h3 className="font-semibold text-foreground text-lg mb-1">
-                            {result.quiz_title}
-                          </h3>
-                          <p className="text-sm text-muted-foreground">
-                            Submitted {new Date(result.submitted_at).toLocaleDateString('en-US', {
-                              year: 'numeric',
-                              month: 'long',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit'
-                            })}
-                          </p>
-                        </div>
-                        <div className={`px-4 py-2 rounded-xl border font-bold text-2xl ${getGradeColor(result.percentage)}`}>
-                          {result.percentage}%
-                        </div>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-4 mb-4">
-                        <div className="bg-muted/50 rounded-lg p-3">
-                          <p className="text-xs text-muted-foreground mb-1">Score</p>
-                          <p className="text-lg font-bold text-foreground">
-                            {result.score} / {result.total_marks}
-                          </p>
-                        </div>
-                        <div className="bg-muted/50 rounded-lg p-3">
-                          <p className="text-xs text-muted-foreground mb-1">Grade</p>
-                          <p className="text-lg font-bold text-foreground">
-                            {result.percentage >= 80 ? 'A' :
-                             result.percentage >= 70 ? 'B' :
-                             result.percentage >= 60 ? 'C' :
-                             result.percentage >= 50 ? 'D' :
-                             result.percentage >= 40 ? 'E' : 'F'}
-                          </p>
-                        </div>
-                      </div>
-
-                      {result.teacher_remarks && (
-                        <div className="bg-accent/10 border border-accent/30 rounded-lg p-4">
-                          <p className="text-xs font-semibold text-accent mb-2">Teacher's Remarks</p>
-                          <p className="text-sm text-foreground">{result.teacher_remarks}</p>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {activeTab === "results" && profile?.id && (
+          <StudentResults studentId={profile.id} />
         )}
 
         {/* Settings Tab */}

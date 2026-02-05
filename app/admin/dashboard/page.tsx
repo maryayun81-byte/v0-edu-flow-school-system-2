@@ -23,11 +23,15 @@ import {
   Sparkles,
   Calendar,
   DollarSign,
+  FileText,
+  Trophy,
 } from "lucide-react";
 import EventManager from "@/components/EventManager";
 import TuitionManager from "@/components/TuitionManager";
 import NotificationCreator from "@/components/admin/NotificationCreator";
 import AdminTimetableTab from "@/components/admin/AdminTimetableTab";
+import AdminExamManager from "@/components/admin/AdminExamManager";
+import AdminTranscriptManager from "@/components/admin/AdminTranscriptManager";
 import { DashboardTabNavigation } from "@/components/DashboardTabNavigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,7 +102,7 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts">("overview");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -487,6 +491,8 @@ export default function AdminDashboard() {
             { id: "teachers", label: "Teachers", icon: Users },
             { id: "classes", label: "Classes", icon: School },
             { id: "students", label: "Students", icon: GraduationCap },
+            { id: "exams", label: "Exams", icon: FileText },
+            { id: "transcripts", label: "Transcripts", icon: Trophy },
             { id: "assignments", label: "Assignments", icon: BookOpen },
             { id: "timetables", label: "Timetables", icon: Calendar },
             { id: "events", label: "Events", icon: Sparkles },
@@ -837,6 +843,16 @@ export default function AdminDashboard() {
               userName="Admin"
             />
           </div>
+        )}
+
+        {/* Exams Tab */}
+        {activeTab === "exams" && (
+          <AdminExamManager />
+        )}
+
+        {/* Transcripts Tab */}
+        {activeTab === "transcripts" && (
+          <AdminTranscriptManager />
         )}
       </div>
     </div>

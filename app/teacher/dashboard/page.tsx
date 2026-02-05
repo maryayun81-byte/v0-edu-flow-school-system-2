@@ -43,6 +43,7 @@ import MyStudents from '@/components/MyStudents';
 import TeacherProfile from '@/components/TeacherProfile';
 import MessagingCenter from '@/components/MessagingCenter';
 import EventManager from '@/components/EventManager';
+import TeacherMarkEntry from '@/components/teacher/TeacherMarkEntry';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -85,7 +86,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 export default function TeacherDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages'>('notes');
+  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages' | 'marks'>('notes');
   const [showQuizBuilder, setShowQuizBuilder] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -98,6 +99,7 @@ export default function TeacherDashboard() {
   const [notifications, setNotifications] = useState<string[]>([]);
   const [showProfileDropdown, setShowProfileDropdown] = useState(false);
   const [userProfile, setUserProfile] = useState<{ full_name?: string; avatar_url?: string } | null>(null);
+  const [showMarkEntry, setShowMarkEntry] = useState(false);
   const [allNotifications, setAllNotifications] = useState<{id: string; type: string; title: string; message: string; created_at: string; is_read: boolean}[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [showArchived, setShowArchived] = useState(false);
@@ -286,6 +288,7 @@ export default function TeacherDashboard() {
     { id: 'home', label: 'Home', icon: Home, count: null },
     { id: 'notes', label: 'Notes', icon: FileText, count: activeNotes.length },
     { id: 'assignments', label: 'Assignments', icon: Calendar, count: activeAssignments.length },
+    { id: 'marks', label: 'Marks', icon: Trophy, count: null },
     { id: 'timetable', label: 'Timetable', icon: Clock, count: timetables.length },
     { id: 'quizzes', label: 'Quizzes', icon: Brain, count: null },
     { id: 'students', label: 'My Students', icon: Users, count: null },
@@ -654,6 +657,32 @@ export default function TeacherDashboard() {
                     </div>
                   </div>
                 ))}
+              </div>
+            )}
+          </div>
+        );
+
+      case 'marks':
+        return (
+          <div className="space-y-6">
+            {showMarkEntry ? (
+              <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-6">
+                <TeacherMarkEntry 
+                  teacherId={user?.id || ''}
+                  onClose={() => setShowMarkEntry(false)}
+                />
+              </div>
+            ) : (
+              <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+                <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-4" />
+                <h3 className="text-xl font-bold text-white mb-2">Exam Marks Entry</h3>
+                <p className="text-gray-400 mb-6">Enter and manage student marks for closed exams</p>
+                <button
+                  onClick={() => setShowMarkEntry(true)}
+                  className="bg-gradient-to-r from-primary to-accent text-primary-foreground px-6 py-3 rounded-xl font-semibold hover:opacity-90 transition-all shadow-lg shadow-primary/30"
+                >
+                  Enter Marks
+                </button>
               </div>
             )}
           </div>
