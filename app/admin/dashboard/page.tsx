@@ -138,20 +138,28 @@ export default function AdminDashboard() {
   }, []);
 
   async function fetchData() {
-    // Fetch teachers
+    // Fetch teachers with their preferences
     const { data: teachersData } = await supabase
       .from("profiles")
       .select("id, full_name, subject, created_at")
       .eq("role", "teacher")
       .order("created_at", { ascending: false });
 
-    // Get emails from auth - we'll use id as fallback
     if (teachersData) {
-      const teachersWithEmails = teachersData.map(t => ({
-        ...t,
-        email: `teacher-${t.id.slice(0, 8)}@eduflow.app`
-      }));
-      setTeachers(teachersWithEmails);
+      // Fetch preferences for all teachers
+      const { data: preferencesData } = await supabase
+        .from("teacher_subject_preferences")
+        .select("teacher_id, subject, preferred_classes");
+
+      const teachersWithDetails = teachersData.map(t => {
+        const prefs = preferencesData?.filter(p => p.teacher_id === t.id) || [];
+        return {
+          ...t,
+          email: `teacher-${t.id.slice(0, 8)}@eduflow.app`,
+          preferences: prefs
+        };
+      });
+      setTeachers(teachersWithDetails);
     }
 
     // Fetch classes
@@ -227,6 +235,14 @@ export default function AdminDashboard() {
   async function handleRemoveAssignment(id: string) {
     await supabase.from("teacher_classes").delete().eq("id", id);
     fetchData();
+  }
+
+  function toggleSubject(subject: string) {
+    setSelectedSubjects(prev =>
+      prev.includes(subject)
+        ? prev.filter(s => s !== subject)
+        : [...prev, subject]
+    );
   }
 
   async function handleLogout() {
@@ -359,14 +375,41 @@ export default function AdminDashboard() {
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label>Select Teacher</Label>
-                <Select value={selectedTeacher} onValueChange={setSelectedTeacher}>
+                <Select value={selectedTeacher} onValueChange={(value) => {
+                  setSelectedTeacher(value);
+                  // Pre-select teacher's preferred subjects
+                  const teacher = teachers.find(t => t.id === value);
+                  if (teacher?.preferences && teacher.preferences.length > 0) {
+                    // Filter subjects that exist in our system SUBJECTS list
+                    const validPreferences = teacher.preferences
+                      .map(p => p.subject)
+                      .filter(s => SUBJECTS.includes(s));
+                    
+                    if (validPreferences.length > 0) {
+                      setSelectedSubjects(validPreferences);
+                    }
+                  } else if (teacher?.subject && SUBJECTS.includes(teacher.subject)) {
+                    // Fallback to legacy single subject
+                    setSelectedSubjects([teacher.subject]);
+                  } else {
+                    setSelectedSubjects([]);
+                  }
+                }}>
                   <SelectTrigger className="h-11 bg-muted border-border/50">
                     <SelectValue placeholder="Choose a teacher" />
                   </SelectTrigger>
                   <SelectContent>
                     {teachers.map(teacher => (
                       <SelectItem key={teacher.id} value={teacher.id}>
-                        {teacher.full_name}
+                        <div className="flex flex-col items-start">
+                          <span>{teacher.full_name}</span>
+                          {teacher.preferences && teacher.preferences.length > 0 && (
+                            <span className="text-xs text-muted-foreground">
+                              Teaches: {teacher.preferences.map(p => p.subject).slice(0, 3).join(", ")}
+                              {teacher.preferences.length > 3 ? "..." : ""}
+                            </span>
+                          )}
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -391,22 +434,43 @@ export default function AdminDashboard() {
 
               <div className="space-y-2">
                 <Label>Teaching Subjects</Label>
-                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-muted/50 rounded-lg">
-                  {SUBJECTS.map(subject => (
-                    <div
-                      key={subject}
-                      onClick={() => toggleSubject(subject)}
-                      className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${
-                        selectedSubjects.includes(subject)
-                          ? "bg-primary/20 border border-primary/50"
-                          : "hover:bg-muted"
-                      }`}
-                    >
-                      <Checkbox checked={selectedSubjects.includes(subject)} />
-                      <span className="text-sm text-foreground">{subject}</span>
-                    </div>
-                  ))}
+                <p className="text-xs text-muted-foreground">Select one or more subjects this teacher will teach for this class</p>
+                <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-2 bg-muted/50 rounded-lg border border-border/50">
+                  {SUBJECTS.map(subject => {
+                    // Check if this subject is preferred by the selected teacher
+                    const teacher = teachers.find(t => t.id === selectedTeacher);
+                    const isPreferred = teacher?.preferences?.some(p => p.subject === subject);
+                    const isLegacyPreferred = teacher?.subject === subject;
+                    const isRecommended = isPreferred || isLegacyPreferred;
+                    
+                    return (
+                      <div
+                        key={subject}
+                        onClick={() => toggleSubject(subject)}
+                        className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all ${
+                          selectedSubjects.includes(subject)
+                            ? "bg-primary/20 border border-primary/50"
+                            : isRecommended
+                              ? "bg-green-500/10 border border-green-500/30 hover:bg-green-500/20"
+                              : "hover:bg-muted border border-transparent"
+                        }`}
+                      >
+                        <Checkbox checked={selectedSubjects.includes(subject)} />
+                        <div className="flex flex-col">
+                          <span className="text-sm text-foreground">{subject}</span>
+                          {isRecommended && (
+                            <span className="text-[10px] text-green-500 font-medium">Recommended</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
+                {selectedSubjects.length > 0 && (
+                  <p className="text-xs text-accent">
+                    {selectedSubjects.length} subject{selectedSubjects.length > 1 ? 's' : ''} selected
+                  </p>
+                )}
               </div>
 
               <Button 

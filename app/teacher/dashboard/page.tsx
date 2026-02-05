@@ -44,6 +44,7 @@ import TeacherProfile from '@/components/TeacherProfile';
 import MessagingCenter from '@/components/MessagingCenter';
 import EventManager from '@/components/EventManager';
 import TeacherMarkEntry from '@/components/teacher/TeacherMarkEntry';
+import TeacherOnboardingModal from '@/components/TeacherOnboardingModal';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -103,7 +104,9 @@ export default function TeacherDashboard() {
   const [allNotifications, setAllNotifications] = useState<{id: string; type: string; title: string; message: string; created_at: string; is_read: boolean}[]>([]);
   const [unreadNotifCount, setUnreadNotifCount] = useState(0);
   const [showArchived, setShowArchived] = useState(false);
+
   const [chatUserId, setChatUserId] = useState<string | null>(null);
+  const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
     // Auth is handled by layout.tsx - just get user session
@@ -147,10 +150,15 @@ export default function TeacherDashboard() {
     try {
       const { data } = await supabase
         .from('profiles')
-        .select('full_name, avatar_url')
+        .select('full_name, avatar_url, onboarding_completed')
         .eq('id', user.id)
         .single();
-      if (data) setUserProfile(data);
+      if (data) {
+        setUserProfile(data);
+        if (data.onboarding_completed === false) {
+          setShowOnboarding(true);
+        }
+      }
     } catch (error) {
       console.error('Error fetching profile:', error);
     }
@@ -695,6 +703,18 @@ export default function TeacherDashboard() {
 
   return (
     <main className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900">
+      {/* Onboarding Modal */}
+      {showOnboarding && user && (
+        <TeacherOnboardingModal
+          teacherId={user.id}
+          teacherName={userProfile?.full_name || 'Teacher'}
+          onComplete={() => {
+            setShowOnboarding(false);
+            fetchUserProfile(); // Refresh profile to get updated onboarding status
+          }}
+        />
+      )}
+
       {/* Notifications */}
       <div className="fixed top-4 right-4 z-50 space-y-2">
         {notifications.map((notif, idx) => (

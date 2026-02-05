@@ -44,10 +44,9 @@ interface NavItem {
 
 const studentNavItems: NavItem[] = [
   { icon: <Home className="h-5 w-5" />, label: "Home", href: "/student/dashboard" },
-  { icon: <BookOpen className="h-5 w-5" />, label: "Notes", href: "/student/notes" },
-  { icon: <Calendar className="h-5 w-5" />, label: "Schedule", href: "/student/schedule" },
-  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/quizzes" },
-  { icon: <User className="h-5 w-5" />, label: "Profile", href: "/student/profile" },
+  { icon: <BookOpen className="h-5 w-5" />, label: "Notes", href: "/student/dashboard?tab=notes" },
+  { icon: <Calendar className="h-5 w-5" />, label: "Schedule", href: "/student/dashboard?tab=timetable" },
+  { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/dashboard?tab=quizzes" },
 ]
 
 const teacherNavItems: NavItem[] = [
@@ -68,10 +67,11 @@ const adminNavItems: NavItem[] = [
 
 const moreMenuItems = {
   student: [
-    { icon: <FileText className="h-5 w-5" />, label: "Assignments", href: "/student/assignments" },
-    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/student/messages" },
-    { icon: <Bell className="h-5 w-5" />, label: "Notifications", href: "/student/notifications" },
-    { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/student/settings" },
+    { icon: <User className="h-5 w-5" />, label: "Profile", href: "/student/dashboard?tab=id-card" },
+    { icon: <FileText className="h-5 w-5" />, label: "Assignments", href: "/student/dashboard?tab=assignments" },
+    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/student/dashboard?tab=messages" },
+    { icon: <Bell className="h-5 w-5" />, label: "Alerts", href: "/student/dashboard?tab=notifications" },
+    { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/student/dashboard?tab=settings" },
   ],
   teacher: [
     { icon: <Calendar className="h-5 w-5" />, label: "Timetable", href: "/teacher/timetable" },
