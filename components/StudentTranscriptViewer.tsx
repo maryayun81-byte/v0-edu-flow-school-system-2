@@ -73,6 +73,7 @@ export default function StudentTranscriptViewer({
   const [settings, setSettings] = useState<SchoolSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const [showSubjects, setShowSubjects] = useState(false);
 
   useEffect(() => {
     fetchTranscript();
@@ -216,17 +217,6 @@ export default function StudentTranscriptViewer({
     return null;
   }
 
-  return (
-  const [showSubjects, setShowSubjects] = useState(false);
-
-  // ... (existing imports and fetch logic) ...
-
-  // Ensure imports include ChevronDown, ChevronUp, etc.
-  // We will assume they are available or add them to the import list if editing the whole file. 
-  // Since I am editing a chunk, I must be careful.
-  // I will assume the user has the imports or I will add them if I can see the top.
-  // I will replace the component from the `handleDownloadPDF` downwards or just the `return`.
-  
   // Safe colors for PDF (replacing 'current' with explicit colors)
   const pdfSafeBorder = "border-gray-900";
   const pdfSafeText = "text-gray-900";
