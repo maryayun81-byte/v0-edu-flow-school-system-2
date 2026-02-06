@@ -470,8 +470,9 @@ export default function AdminDashboard() {
                       <SelectContent>
                         {classes
                             .filter(c => {
-                                if (assignmentCurriculum === 'CBC') return c.name.startsWith('Grade');
-                                if (assignmentCurriculum === '8-4-4') return c.name.startsWith('Form');
+                                const name = c.name.toLowerCase();
+                                if (assignmentCurriculum === 'CBC') return name.startsWith('grade');
+                                if (assignmentCurriculum === '8-4-4') return name.startsWith('form');
                                 return true;
                             })
                             .map(cls => (
