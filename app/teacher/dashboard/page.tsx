@@ -327,11 +327,7 @@ export default function TeacherDashboard() {
       return;
     }
 
-    if (id === 'home') {
-      setActiveTab('notes'); 
-    } else {
-      setActiveTab(id as any);
-    }
+    setActiveTab(id as any);
   };
 
   const renderContent = () => {

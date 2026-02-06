@@ -29,6 +29,7 @@ import {
   AlertCircle,
   ShieldAlert,
   BellRing,
+  Menu,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -591,18 +592,22 @@ export default function StudentDashboard() {
           <div className="flex items-center justify-around px-2 py-2">
             {[
               { id: "overview", label: "Home", icon: TrendingUp },
-              { id: "notes", label: "Notes", icon: FileText },
               { id: "timetable", label: "Schedule", icon: Calendar },
               { id: "notifications", label: "Alerts", icon: Bell },
               { id: "messages", label: "Messages", icon: MessageSquare },
+              { id: "more", label: "More", icon: Menu },
             ].map((tab) => (
               <button
                 key={tab.id}
-                type="button"
                 onClick={() => {
-                  setActiveTab(tab.id as typeof activeTab);
-                  setShowMoreMenu(false);
+                   if (tab.id === 'more') {
+                     setShowMoreMenu(!showMoreMenu);
+                   } else {
+                     setActiveTab(tab.id as typeof activeTab);
+                     setShowMoreMenu(false);
+                   }
                 }}
+                type="button"
                 className={`relative flex flex-col items-center justify-center min-w-[64px] py-2 px-3 rounded-xl transition-all duration-200 ${
                   activeTab === tab.id
                     ? "text-primary bg-primary/10"
@@ -618,19 +623,7 @@ export default function StudentDashboard() {
                 )}
               </button>
             ))}
-            {/* More Menu Button */}
-            <button
-              type="button"
-              onClick={() => setShowMoreMenu(!showMoreMenu)}
-              className={`flex flex-col items-center justify-center min-w-[64px] py-2 px-3 rounded-xl transition-all duration-200 ${
-                showMoreMenu
-                  ? "text-primary bg-primary/10"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
-              }`}
-            >
-              <Settings className="w-5 h-5" />
-              <span className="text-[10px] mt-1 font-medium">More</span>
-            </button>
+
           </div>
         </nav>
 
@@ -657,6 +650,7 @@ export default function StudentDashboard() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {[
+                    { id: "notes", label: "Notes", icon: FileText },
                     { id: "assignments", label: "Assignments", icon: Target },
                     { id: "quizzes", label: "Quizzes", icon: Brain },
                     { id: "results", label: "Results", icon: Trophy },
