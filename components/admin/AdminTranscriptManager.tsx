@@ -85,10 +85,28 @@ interface SchoolSettings {
   school_name: string;
   logo_url: string | null;
   stamp_url: string | null;
+
   signature_url: string | null;
   auto_attach_stamp: boolean;
   auto_attach_signature: boolean;
   transcript_theme: string;
+  motto: string;
+  address: string;
+  phone: string;
+  email: string;
+}
+
+interface GradingScale {
+  grade_label: string;
+  min_percentage: number;
+  max_percentage: number;
+  grade_points: number;
+  remarks: string;
+}
+
+interface Signature {
+  role: string;
+  signature_url: string;
 }
 
 export default function AdminTranscriptManager() {
@@ -104,6 +122,10 @@ export default function AdminTranscriptManager() {
   const [currentPage, setCurrentPage] = useState(1);
   const [settings, setSettings] = useState<SchoolSettings | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
+  
+  // Grading State
+  const [gradingScales, setGradingScales] = useState<GradingScale[]>([]);
+  const [activeSignature, setActiveSignature] = useState<string | null>(null);
 
   const itemsPerPage = 20;
 
@@ -111,7 +133,36 @@ export default function AdminTranscriptManager() {
     fetchClasses();
     fetchExams(); // Fetch all exams initially, we filter in UI
     fetchSettings();
+    fetchGradingSystem();
+    fetchActiveSignature();
   }, []);
+
+  async function fetchGradingSystem() {
+      // 1. Get active system
+      const { data: system } = await supabase.from("grading_systems").select("id").eq("is_active", true).single();
+      if (!system) return;
+
+      // 2. Get scales
+      const { data: scales } = await supabase
+        .from("grading_scales")
+        .select("*")
+        .eq("grading_system_id", system.id)
+        .order("min_percentage", { ascending: false });
+      
+      if (scales) setGradingScales(scales);
+  }
+
+  async function fetchActiveSignature() {
+      // Try to get Principal signature from new table
+      const { data } = await supabase
+        .from("signatures")
+        .select("signature_url")
+        .eq("role", "Principal")
+        .eq("is_active", true)
+        .single();
+      
+      if (data) setActiveSignature(data.signature_url);
+  }
 
   async function fetchExams() {
     const { data } = await supabase
@@ -461,6 +512,12 @@ export default function AdminTranscriptManager() {
   }
 
   function calculateGrade(percentage: number): string {
+    if (gradingScales.length > 0) {
+        const match = gradingScales.find(s => percentage >= s.min_percentage && percentage <= s.max_percentage);
+        return match ? match.grade_label : "E";
+    }
+    
+    // Fallback Legacy
     if (percentage >= 90) return "A";
     if (percentage >= 80) return "A-";
     if (percentage >= 75) return "B+";
@@ -598,6 +655,14 @@ export default function AdminTranscriptManager() {
                          <p className="font-semibold">{classes.find((c) => c.id === selectedClass)?.name}</p>
                       </div>
                    </div>
+                      
+                    {/* NEW: School Address/Contact Info if available */}
+                   {(settings?.motto || settings?.email) && (
+                       <div className="col-span-2 mt-2 text-xs opacity-70 border-t border-current/10 pt-2 flex justify-between">
+                            <span>{settings?.motto}</span>
+                            <span>{settings?.email} | {settings?.phone}</span>
+                       </div>
+                   )}
                    <div className="grid grid-cols-2 gap-4">
                        <div>
                           <p className="text-xs uppercase tracking-widest opacity-50 mb-1">Term</p>
@@ -683,9 +748,9 @@ export default function AdminTranscriptManager() {
                              alt="Official Stamp"
                            />
                          )}
-                         {settings?.auto_attach_signature && settings?.signature_url && (
+                         {settings?.auto_attach_signature && (settings?.signature_url || activeSignature) && (
                             <img 
-                              src={settings.signature_url}
+                              src={activeSignature || settings.signature_url || ""}
                               className="h-20 object-contain absolute bottom-4 select-none pointer-events-none"
                               alt="Principal Signature"
                             />

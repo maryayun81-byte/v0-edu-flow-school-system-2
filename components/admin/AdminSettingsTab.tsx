@@ -16,7 +16,11 @@ import {
   PenTool,
   Keyboard,
   Eraser,
+  GraduationCap,
+  Pen
 } from "lucide-react";
+import GradingSystemManager from "./GradingSystemManager";
+import SignatureManager from "./SignatureManager";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,6 +50,10 @@ interface SchoolSettings {
   auto_attach_stamp: boolean;
   auto_attach_signature: boolean;
   transcript_theme: string;
+  motto: string;
+  address: string;
+  phone: string;
+  email: string;
 }
 
 interface AdminUser {
@@ -104,7 +112,11 @@ export default function AdminSettingsTab() {
           signature_url: null,
           auto_attach_stamp: false,
           auto_attach_signature: false,
-          transcript_theme: "Modern"
+          transcript_theme: "Modern",
+          motto: "",
+          address: "",
+          phone: "",
+          email: ""
         });
       }
     } catch (error) {
@@ -261,6 +273,10 @@ export default function AdminSettingsTab() {
           auto_attach_stamp: settings.auto_attach_stamp,
           auto_attach_signature: settings.auto_attach_signature,
           transcript_theme: settings.transcript_theme,
+          motto: settings.motto,
+          address: settings.address,
+          phone: settings.phone,
+          email: settings.email,
           updated_at: new Date().toISOString(),
         });
 
@@ -307,6 +323,12 @@ export default function AdminSettingsTab() {
           <TabsTrigger value="branding" className="flex items-center gap-2">
              <Settings className="w-4 h-4" /> Global Branding
           </TabsTrigger>
+          <TabsTrigger value="grading" className="flex items-center gap-2">
+             <GraduationCap className="w-4 h-4" /> Grading System
+          </TabsTrigger>
+          <TabsTrigger value="signatures" className="flex items-center gap-2">
+             <Pen className="w-4 h-4" /> Signatures
+          </TabsTrigger>
           <TabsTrigger value="themes" className="flex items-center gap-2">
              <Palette className="w-4 h-4" /> Transcript Themes
           </TabsTrigger>
@@ -317,6 +339,53 @@ export default function AdminSettingsTab() {
 
         <TabsContent value="branding" className="space-y-4 py-4">
           <div className="grid md:grid-cols-2 gap-6">
+             {/* School Details */}
+             <div className="bg-card border border-border/50 rounded-xl p-6 space-y-4 md:col-span-2">
+                <h3 className="font-semibold flex items-center gap-2">
+                  <Settings className="w-4 h-4" /> School Profile
+                </h3>
+                <div className="grid md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                        <Label>School Name</Label>
+                        <Input 
+                            value={settings?.school_name || ""} 
+                            onChange={e => settings && setSettings({...settings, school_name: e.target.value})}
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>School Motto</Label>
+                        <Input 
+                            value={settings?.motto || ""} 
+                            onChange={e => settings && setSettings({...settings, motto: e.target.value})}
+                            placeholder="e.g. Excellence in Education"
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Phone Contact</Label>
+                        <Input 
+                            value={settings?.phone || ""} 
+                            onChange={e => settings && setSettings({...settings, phone: e.target.value})}
+                            placeholder="+254..."
+                        />
+                    </div>
+                    <div className="space-y-2">
+                        <Label>Email Address</Label>
+                        <Input 
+                            value={settings?.email || ""} 
+                            onChange={e => settings && setSettings({...settings, email: e.target.value})}
+                            placeholder="info@school.com"
+                        />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                        <Label>Physical Address</Label>
+                        <Input 
+                            value={settings?.address || ""} 
+                            onChange={e => settings && setSettings({...settings, address: e.target.value})}
+                            placeholder="P.O. Box..."
+                        />
+                    </div>
+                </div>
+             </div>
              {/* Logo Section */}
              <div className="bg-card border border-border/50 rounded-xl p-6 space-y-4">
                 <h3 className="font-semibold flex items-center gap-2">
@@ -402,79 +471,7 @@ export default function AdminSettingsTab() {
                   </div>
                 </div>
              </div>
-             
-             {/* NEW: Signature Designer */}
-             <div className="bg-card border border-border/50 rounded-xl p-6 space-y-4 md:col-span-2">
-                <h3 className="font-semibold flex items-center gap-2">
-                  <PenTool className="w-4 h-4" /> Principal's Signature
-                </h3>
-                
-                <Tabs value={signatureMode} onValueChange={(v:any) => setSignatureMode(v)} className="w-full">
-                   <TabsList className="mb-4">
-                      <TabsTrigger value="draw" className="flex gap-2"><PenTool className="w-3 h-3"/> Draw</TabsTrigger>
-                      <TabsTrigger value="type" className="flex gap-2"><Keyboard className="w-3 h-3"/> Type</TabsTrigger>
-                   </TabsList>
-                   
-                   <TabsContent value="draw" className="flex flex-col items-center gap-4">
-                      <div className="border-2 border-dashed border-border rounded-lg bg-white overflow-hidden relative group">
-                         <canvas 
-                            ref={canvasRef}
-                            width={500}
-                            height={150}
-                            className="w-full max-w-[500px] h-[150px] cursor-crosshair touch-none"
-                            onMouseDown={startDrawing}
-                            onMouseMove={draw}
-                            onMouseUp={stopDrawing}
-                            onMouseLeave={stopDrawing}
-                            onTouchStart={startDrawing}
-                            onTouchMove={draw}
-                            onTouchEnd={stopDrawing}
-                         />
-                         <Button 
-                           size="sm" 
-                           variant="destructive" 
-                           onClick={clearCanvas} 
-                           className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity"
-                         >
-                           <Eraser className="w-3 h-3 mr-1" /> Clear
-                         </Button>
-                      </div>
-                      <p className="text-xs text-muted-foreground">Draw your signature above using your mouse or touch screen.</p>
-                   </TabsContent>
-                   
-                   <TabsContent value="type" className="space-y-4 w-full max-w-md mx-auto">
-                      <div className="space-y-2">
-                         <Label>Type Full Name</Label>
-                         <Input 
-                            value={typedSignature}
-                            onChange={e => setTypedSignature(e.target.value)}
-                            placeholder="e.g. Dr. John Doe"
-                            className="text-center text-lg"
-                         />
-                      </div>
-                      <div className="h-32 flex items-center justify-center border rounded-lg bg-white p-4">
-                         {typedSignature ? (
-                            <span className="text-4xl italic font-[cursive]" style={{ fontFamily: '"Brush Script MT", cursive' }}>
-                               {typedSignature}
-                            </span>
-                         ) : (
-                            <span className="text-muted-foreground italic">Preview will appear here</span>
-                         )}
-                      </div>
-                   </TabsContent>
-                </Tabs>
-                
-                {settings?.signature_url && (
-                   <div className="mt-4 pt-4 border-t flex items-center justify-between">
-                      <div className="flex items-center gap-4">
-                         <span className="text-sm font-medium">Current Signature:</span>
-                         <img src={settings.signature_url} className="h-12 object-contain" alt="Current Signature" />
-                      </div>
-                      <p className="text-xs text-green-600 flex items-center"><Check className="w-3 h-3 mr-1"/> Saved</p>
-                   </div>
-                )}
-             </div>
-             
+
               {/* Auto-Attach Logic for Signature too? Maybe just use Stamp section for global auto-attach */}
               
               <div className="flex flex-col gap-4">
@@ -522,6 +519,14 @@ export default function AdminSettingsTab() {
               </div>
            </div>
        </TabsContent>
+
+        <TabsContent value="grading" className="space-y-4 py-4">
+            <GradingSystemManager />
+        </TabsContent>
+
+        <TabsContent value="signatures" className="space-y-4 py-4">
+            <SignatureManager />
+        </TabsContent>
 
         {/* THEMES TAB */}
         <TabsContent value="themes" className="space-y-4 py-4">
