@@ -1,12 +1,13 @@
-'use client';
+"use client";
 
-import React from "react"
-
-import { useState } from 'react';
-import { useRouter } from 'next/navigation';
-import Link from 'next/link';
-import { createClient } from '@supabase/supabase-js';
-import { LogIn, ArrowLeft, Eye, EyeOff } from 'lucide-react';
+import React, { useState } from "react";
+import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { createClient } from "@supabase/supabase-js";
+import { BookOpen, Lock, Eye, EyeOff, ArrowLeft, Loader2, Sparkles, Mail } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -15,15 +16,15 @@ const supabase = createClient(
 
 export default function TeacherLogin() {
   const router = useRouter();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
-  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError('');
+    setError("");
     setLoading(true);
 
     try {
@@ -34,6 +35,7 @@ export default function TeacherLogin() {
 
       if (error) {
         setError(error.message);
+        setLoading(false);
         return;
       }
 
@@ -43,104 +45,148 @@ export default function TeacherLogin() {
     } catch (err) {
       setError('An unexpected error occurred');
       console.error(err);
-    } finally {
       setLoading(false);
     }
   };
 
   return (
-    <main className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center px-4">
-      <div className="w-full max-w-md">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-gray-600 hover:text-gray-900 font-medium mb-8 transition-colors"
-        >
-          <ArrowLeft className="w-5 h-5" />
-          Back to Home
-        </Link>
+    <div className="min-h-screen bg-background flex flex-col relative overflow-hidden">
+      {/* Background Effects */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/20 rounded-full blur-[100px] translate-x-1/3 -translate-y-1/3" />
+        <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-secondary/15 rounded-full blur-[80px] -translate-x-1/3 translate-y-1/3" />
+      </div>
 
-        <div className="bg-white rounded-2xl shadow-xl p-8">
-          <div className="flex items-center justify-center gap-3 mb-6">
-            <div className="bg-indigo-100 p-3 rounded-full">
-              <LogIn className="w-6 h-6 text-indigo-600" />
-            </div>
-            <h1 className="text-2xl font-bold text-gray-900">Teacher Login</h1>
+      {/* Header */}
+      <header className="relative z-10 w-full border-b border-border/50 bg-card/30 backdrop-blur-xl">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+          <div className="flex items-center justify-between">
+            <Link href="/" className="flex items-center gap-3 group">
+              <div className="w-10 h-10 bg-primary rounded-xl flex items-center justify-center">
+                <Sparkles className="w-5 h-5 text-primary-foreground" />
+              </div>
+              <span className="text-xl font-bold text-foreground">EduFlow</span>
+            </Link>
+            <Link href="/">
+              <Button variant="ghost" size="sm" className="gap-2">
+                <ArrowLeft className="w-4 h-4" />
+                Back to Home
+              </Button>
+            </Link>
           </div>
+        </div>
+      </header>
 
-          <p className="text-gray-600 text-center mb-8">
-            Sign in to manage your course materials
-          </p>
-
-          {error && (
-            <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 text-sm font-medium">{error}</p>
-            </div>
-          )}
-
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">
-                Email Address
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                placeholder="you@example.com"
-              />
-            </div>
-
-            <div>
-              <label className="block text-gray-700 font-semibold mb-2">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                  placeholder="••••••••"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
-                >
-                  {showPassword ? (
-                    <EyeOff className="w-5 h-5" />
-                  ) : (
-                    <Eye className="w-5 h-5" />
-                  )}
-                </button>
+      {/* Main Content */}
+      <main className="relative z-10 flex-1 flex items-center justify-center px-4 py-12">
+        <div className="w-full max-w-md">
+          {/* Card */}
+          <div className="bg-card/40 backdrop-blur-xl border border-border/50 rounded-2xl p-8 shadow-xl">
+            {/* Icon */}
+            <div className="flex justify-center mb-6">
+              <div className="w-16 h-16 bg-primary/20 rounded-2xl flex items-center justify-center">
+                <BookOpen className="w-8 h-8 text-primary" />
               </div>
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-lg hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? 'Signing in...' : 'Sign In'}
-            </button>
-          </form>
+            {/* Title */}
+            <div className="text-center mb-8">
+              <h1 className="text-2xl font-bold text-foreground mb-2">Teacher Login</h1>
+              <p className="text-muted-foreground text-sm">
+                Sign in to manage your course materials
+              </p>
+            </div>
 
-          <div className="mt-8 pt-8 border-t border-gray-200">
-            <p className="text-gray-600 text-center text-sm">
-              Don't have an account?{' '}
-              <Link
-                href="/teacher/signup"
-                className="text-indigo-600 font-semibold hover:text-indigo-700"
+            {/* Error Message */}
+            {error && (
+              <div className="mb-6 p-4 bg-destructive/10 border border-destructive/30 rounded-xl">
+                <p className="text-sm text-destructive text-center">{error}</p>
+              </div>
+            )}
+
+            {/* Form */}
+            <form onSubmit={handleLogin} className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="email" className="text-sm text-foreground">
+                  Email Address
+                </Label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder="you@example.com"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="pl-11 h-12 bg-input border-border/50 focus:border-primary focus:ring-primary/20"
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="password" className="text-sm text-foreground">
+                  Password
+                </Label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    placeholder="••••••••"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="pl-11 pr-11 h-12 bg-input border-border/50 focus:border-primary focus:ring-primary/20"
+                    required
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    {showPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                disabled={loading}
+                className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-semibold"
               >
-                Create one here
-              </Link>
-            </p>
+                {loading ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Signing in...
+                  </>
+                ) : (
+                  "Sign In"
+                )}
+              </Button>
+            </form>
+
+            {/* Divider */}
+            <div className="relative my-8">
+              <div className="absolute inset-0 flex items-center">
+                <div className="w-full border-t border-border/50" />
+              </div>
+              <div className="relative flex justify-center text-xs">
+                <span className="px-4 bg-card text-muted-foreground">Don't have an account?</span>
+              </div>
+            </div>
+
+            {/* Sign Up Link */}
+            <Link href="/teacher/signup">
+              <Button
+                variant="outline"
+                className="w-full h-12 border-border/50 bg-transparent hover:bg-card/50"
+              >
+                Create Teacher Account
+              </Button>
+            </Link>
           </div>
         </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
