@@ -311,25 +311,75 @@ export default function AdminTranscriptManager() {
   }
   
   async function saveDraftsBatch(list: Transcript[]) {
-      // Upsert transcripts (not items yet to save time, or do items too?)
-      // Doing items is safer.
-      // This might be slow for large classes, but necessary for persistent "Drafts".
-      
-      // Let's just save the Transcript header first with status 'Draft'.
-      const upserts = list.map(t => ({
-          exam_id: selectedExam,
-          student_id: t.student_id,
-          class_id: selectedClass,
-          total_score: t.total_score,
-          average_score: t.average_score,
-          overall_grade: t.overall_grade,
-          class_position: t.class_position,
-          admin_remarks: t.admin_remarks,
-          status: t.status // preserve
-      }));
-      
-      const { error } = await supabase.from("transcripts").upsert(upserts, { onConflict: 'exam_id, student_id' });
-      if(error) console.error("Autosave error", error);
+      try {
+        // 1. Prepare transcripts payload
+        const transcriptPayloads = list.map(t => ({
+            exam_id: selectedExam,
+            student_id: t.student_id,
+            class_id: selectedClass,
+            total_score: t.total_score,
+            average_score: t.average_score,
+            overall_grade: t.overall_grade,
+            class_position: t.class_position,
+            admin_remarks: t.admin_remarks,
+            status: t.status // preserve
+        }));
+
+        // 2. Upsert Transcripts and get IDs
+        const { data: savedTranscripts, error } = await supabase
+            .from("transcripts")
+            .upsert(transcriptPayloads, { onConflict: 'exam_id, student_id' })
+            .select();
+        
+        if (error || !savedTranscripts) {
+            console.error("Autosave headers error", error);
+            alert("Failed to save drafts. Please try again.");
+            return;
+        }
+
+        // 3. Prepare Items Payload
+        let allItems: any[] = [];
+        
+        for (const savedT of savedTranscripts) {
+            const original = list.find(t => t.student_id === savedT.student_id);
+            if (original && original.items) {
+                const itemsWithId = original.items.map(item => ({
+                    transcript_id: savedT.id,
+                    subject_id: item.subject_id,
+                    subject_name: item.subject_name,
+                    score: item.score,
+                    max_score: item.max_score,
+                    grade: item.grade,
+                    teacher_remarks: item.teacher_remarks
+                }));
+                allItems = [...allItems, ...itemsWithId];
+            }
+        }
+
+        // 4. Delete old items for these transcripts (to cleanup before insert)
+        const transcriptIds = savedTranscripts.map(t => t.id);
+        if (transcriptIds.length > 0) {
+            const { error: deleteError } = await supabase
+                .from("transcript_items")
+                .delete()
+                .in("transcript_id", transcriptIds);
+            
+            if (deleteError) {
+                 console.error("Error clearing old items:", deleteError);
+            }
+
+            // 5. Insert new items
+            if (allItems.length > 0) {
+                const { error: itemsError } = await supabase.from("transcript_items").insert(allItems);
+                if (itemsError) {
+                    console.error("Error saving items:", itemsError);
+                    alert("Drafts saved, but failed to save subjects details.");
+                }
+            }
+        }
+      } catch (e) {
+         console.error("Critical autosave error:", e);
+      }
   }
 
   async function handlePublishTranscript(transcript: Transcript) {
