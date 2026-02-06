@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import GradingSystemManager from "./GradingSystemManager";
 import SignatureManager from "./SignatureManager";
+import TeacherClassManager from "./TeacherClassManager";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -164,6 +165,7 @@ export default function AdminSettingsTab() {
   
   // User Management State
   const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [showClassManager, setShowClassManager] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
 
   async function handleUpdateRole(userId: string, newRole: 'admin' | 'teacher' | 'student') {
@@ -712,13 +714,27 @@ export default function AdminSettingsTab() {
                                 </DropdownMenuTrigger>
                                 <DropdownMenuContent align="end">
                                     <DropdownMenuLabel>Manage Access</DropdownMenuLabel>
-                                    <DropdownMenuItem onClick={() => handleUpdateRole(admin.id, 'student')}>
-                                        <UserMinus className="w-4 h-4 mr-2" /> Revoke Admin
-                                    </DropdownMenuItem>
-                                    <DropdownMenuSeparator />
-                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteUser(admin.id)}>
-                                        <Trash2 className="w-4 h-4 mr-2" /> Remove User
-                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onSelect={() => handleUpdateRole(admin.id, 'admin')}>
+                                <Shield className="w-4 h-4 mr-2" />
+                                Make Admin
+                              </DropdownMenuItem>
+                              {admin.role === 'teacher' && (
+                                <DropdownMenuItem onSelect={() => {
+                                  setSelectedUser(admin);
+                                  setShowClassManager(true);
+                                }}>
+                                  <GraduationCap className="w-4 h-4 mr-2" />
+                                  Manage Classes
+                                </DropdownMenuItem>
+                              )}
+                              <DropdownMenuSeparator />
+                              <DropdownMenuItem 
+                                className="text-destructive focus:text-destructive"
+                                onSelect={() => handleDeleteUser(admin.id)}
+                              >
+                                <UserMinus className="w-4 h-4 mr-2" />
+                                Remove User
+                              </DropdownMenuItem>
                                 </DropdownMenuContent>
                             </DropdownMenu>
                         </div>
@@ -835,6 +851,18 @@ export default function AdminSettingsTab() {
           </div>
         </TabsContent>
       </Tabs>
+      {/* Clean User Manager Dialog */}
+      {selectedUser && showClassManager && (
+        <TeacherClassManager 
+            isOpen={showClassManager}
+            onClose={() => {
+                setShowClassManager(false);
+                setSelectedUser(null);
+            }}
+            teacherId={selectedUser.id}
+            teacherName={selectedUser.full_name}
+        />
+      )}
     </div>
   );
 }

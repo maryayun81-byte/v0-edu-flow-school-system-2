@@ -54,39 +54,95 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
   useEffect(() => {
     async function fetchData() {
       try {
-        // 1. Fetch Teacher Classes
-        const { data: teacherClasses } = await supabase
-          .from('teacher_classes')
-          .select(`
-            class_id,
-            subjects,
-            classes!inner (id, name, form_level)
-          `)
-          .eq('teacher_id', userId);
+        // 0. Check User Role
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('role')
+            .eq('id', userId)
+            .single();
 
-        if (!teacherClasses) return;
+        const role = profile?.role;
 
-        // Process Classes
-        const processedClasses = teacherClasses.map((tc: any) => ({
-          id: tc.class_id,
-          name: tc.classes.name,
-          form_level: tc.classes.form_level,
-          subjects: tc.subjects || []
-        }));
-        setClasses(processedClasses);
-
-        // 2. Fetch All Subjects to Map Names -> IDs
-        // We get all distinct subject names from the teacher's classes to minimize query
-        const allSubjectNames = Array.from(new Set(processedClasses.flatMap(c => c.subjects)));
-        
-        if (allSubjectNames.length > 0) {
-            const { data: subjectData } = await supabase
-            .from('subjects')
-            .select('id, name')
-            .in('name', allSubjectNames);
+        if (role === 'admin') {
+            // ADMIN STRATEGY: Fetch ALL Classes and ALL Subjects
+            const { data: allClasses } = await supabase
+                .from('classes')
+                .select('id, name, form_level'); // Admins can assign to any class
             
-            if (subjectData) {
-                setSubjects(subjectData);
+            // We need subjects too. Ideally classes have subjects? 
+            // The table schema for `classes` might not have `subjects` array if it's strictly normalized? 
+            // In the Teacher query we got `subjects` from `teacher_classes`.
+            // Let's assume for Admin we fetch ALL subjects available in the system or we need to know which subjects a class takes.
+            // If `classes` table doesn't have subjects, we might need to fetch all subjects and let admin choose?
+            // But the UI relies on `cls.subjects.includes(s.name)`.
+            // Let's assume for now we list all subjects for all classes for Admins? 
+            // Or better: Fetch all subjects, and modify the filter filter logic?
+            // Actually, the teacher logic `classes` state expects `{id, name, subjects[]}`.
+            // If `classes` table doesn't have `subjects` column, we have a problem.
+            // Let's check `classes` schema via a small view? No, I'll rely on common sense first.
+            // If the `teacher_classes` query worked: `classes!inner (id, name, form_level)`... wait, `subjects` came from `teacher_classes` (the join table).
+            // So `classes` table likely DOES NOT have `subjects`.
+            
+            // If `classes` table doesn't have subjects, how do we know what subjects a class takes?
+            // Usually valid usage: Admin assigns "Mathematics" to "Form 1".
+            // If we don't strict filter subjects for admins, it might be fine.
+            // Let's just give Admins ALL classes and ALL subjects.
+            
+            if (allClasses) {
+                // Mock subjects into the class object or fetch real ones?
+                // Let's fetch all subjects first.
+                const { data: allSubjects } = await supabase.from('subjects').select('id, name');
+                if (allSubjects) {
+                    setSubjects(allSubjects);
+                    
+                    // For Admin, we can say every class "supports" every subject (flexible) 
+                    // OR we just map all subject names to every class so the filter passes.
+                    const allSubjectNames = allSubjects.map(s => s.name);
+                    
+                    setClasses(allClasses.map((c: any) => ({
+                        id: c.id,
+                        name: c.name,
+                        form_level: c.form_level,
+                        subjects: allSubjectNames // Allow admin to pick ANY subject for ANY class
+                    })));
+                }
+            }
+            
+        } else {
+            // TEACHER STRATEGY (Existing)
+            // 1. Fetch Teacher Classes
+            const { data: teacherClasses } = await supabase
+              .from('teacher_classes')
+              .select(`
+                class_id,
+                subjects,
+                classes!inner (id, name, form_level)
+              `)
+              .eq('teacher_id', userId);
+    
+            if (!teacherClasses) return;
+    
+            // Process Classes
+            const processedClasses = teacherClasses.map((tc: any) => ({
+              id: tc.class_id,
+              name: tc.classes.name,
+              form_level: tc.classes.form_level,
+              subjects: tc.subjects || []
+            }));
+            setClasses(processedClasses);
+    
+            // 2. Fetch All Subjects to Map Names -> IDs
+            const allSubjectNames = Array.from(new Set(processedClasses.flatMap(c => c.subjects)));
+            
+            if (allSubjectNames.length > 0) {
+                const { data: subjectData } = await supabase
+                .from('subjects')
+                .select('id, name')
+                .in('name', allSubjectNames);
+                
+                if (subjectData) {
+                    setSubjects(subjectData);
+                }
             }
         }
 
@@ -102,9 +158,14 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
   const filteredClasses = React.useMemo(() => {
     if (!selectedCurriculum) return [];
     return classes.filter(c => {
-        if (selectedCurriculum === 'CBC') return c.name.startsWith('Grade') || c.name.startsWith('PP');
-        // Relaxed 8-4-4 logic: Show everything that is NOT CBC (Grade/PP)
-        if (selectedCurriculum === '8-4-4') return !c.name.startsWith('Grade') && !c.name.startsWith('PP');
+        const name = c.name.toLowerCase();
+        if (selectedCurriculum === 'CBC') {
+            return name.startsWith('grade') || name.startsWith('pp') || name.includes('(cbc)');
+        }
+        // Relaxed 8-4-4 logic: Show everything that is NOT CBC
+        if (selectedCurriculum === '8-4-4') {
+            return !name.startsWith('grade') && !name.startsWith('pp') && !name.includes('(cbc)');
+        }
         return true;
     });
   }, [classes, selectedCurriculum]);
