@@ -35,6 +35,7 @@ interface GradingSystem {
   id: string;
   name: string;
   is_active: boolean;
+  system_type: 'CBC' | '8-4-4';
 }
 
 interface GradeScale {
@@ -60,7 +61,6 @@ export default function GradingSystemManager() {
   const [systems, setSystems] = useState<GradingSystem[]>([]);
   const [selectedSystemId, setSelectedSystemId] = useState<string | null>(null);
   const [scales, setScales] = useState<GradeScale[]>([]);
-  const [overrides, setOverrides] = useState<SubjectOverride[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   
@@ -74,7 +74,6 @@ export default function GradingSystemManager() {
   useEffect(() => {
     if (selectedSystemId) {
       fetchScales(selectedSystemId);
-      // fetchOverrides(selectedSystemId); // TODO: Implement override fetching
     } else {
       setScales([]);
     }
@@ -83,7 +82,7 @@ export default function GradingSystemManager() {
   async function fetchSystems() {
     const { data } = await supabase.from("grading_systems").select("*").order("created_at", { ascending: false });
     if (data) {
-      setSystems(data);
+      setSystems(data as GradingSystem[]);
       if (data.length > 0 && !selectedSystemId) {
          // Auto-select active one or first
          const active = data.find(s => s.is_active);
@@ -105,12 +104,32 @@ export default function GradingSystemManager() {
   async function handleCreateSystem() {
     const name = prompt("Enter name for new grading system (e.g. 'KCSE 2026'):");
     if (!name) return;
+    
+    // Simple prompt for type - in a real UI this would be a modal
+    const typeInput = prompt("Enter system type (CBC or 8-4-4):", "8-4-4");
+    const system_type = typeInput?.toUpperCase() === 'CBC' ? 'CBC' : '8-4-4';
 
-    const { data, error } = await supabase.from("grading_systems").insert({ name, is_active: false }).select().single();
+    const { data, error } = await supabase.from("grading_systems").insert({ 
+        name, 
+        is_active: false,
+        system_type: system_type
+    }).select().single();
+
     if (data) {
         setSystems([data, ...systems]);
         setSelectedSystemId(data.id);
-        // Default scales?
+        
+        // Default seeds based on type
+        if (system_type === 'CBC') {
+             const seeds = [
+                { grade_label: 'EE', min_percentage: 80, max_percentage: 100, grade_points: 4, remarks: 'Exceeding Expectations' },
+                { grade_label: 'ME', min_percentage: 60, max_percentage: 79, grade_points: 3, remarks: 'Meeting Expectations' },
+                { grade_label: 'AE', min_percentage: 40, max_percentage: 59, grade_points: 2, remarks: 'Approaching Expectations' },
+                { grade_label: 'BE', min_percentage: 0, max_percentage: 39, grade_points: 1, remarks: 'Below Expectations' }
+             ];
+             await supabase.from("grading_scales").insert(seeds.map(s => ({ ...s, grading_system_id: data.id })));
+             fetchScales(data.id);
+        }
     }
   }
 
@@ -196,28 +215,39 @@ export default function GradingSystemManager() {
        </div>
 
        {/* System Selector */}
-       <div className="flex gap-4 overflow-x-auto pb-2">
+       <div className="flex gap-4 overflow-x-auto pb-4 scrollbar-thin">
            {systems.map(sys => (
                <div 
                  key={sys.id}
                  onClick={() => setSelectedSystemId(sys.id)}
                  className={`
-                    flex items-center gap-3 px-4 py-3 rounded-lg border cursor-pointer min-w-[200px] transition-all
-                    ${selectedSystemId === sys.id ? 'border-primary bg-primary/5 shadow-sm' : 'hover:border-primary/50'}
+                    px-4 py-3 rounded-xl border cursor-pointer min-w-[240px] transition-all relative
+                    ${selectedSystemId === sys.id ? 'border-primary bg-primary/5 shadow-md scale-[1.02]' : 'hover:border-primary/50 bg-card'}
                  `}
                >
-                  <div className="flex-1">
-                      <p className="font-medium text-sm">{sys.name}</p>
-                      {sys.is_active ? (
-                          <span className="text-[10px] text-green-600 font-bold flex items-center mt-1">
+                  <div className="flex justify-between items-start mb-2">
+                       <Badge variant="outline" className={`${sys.system_type === 'CBC' ? 'border-green-500 text-green-600' : 'border-blue-500 text-blue-600'}`}>
+                           {sys.system_type || '8-4-4'}
+                       </Badge>
+                       {sys.is_active && (
+                          <span className="text-[10px] bg-primary text-primary-foreground px-2 py-0.5 rounded-full font-bold flex items-center">
                              <Check className="w-3 h-3 mr-1" /> ACTIVE
                           </span>
-                      ) : (
-                          <button onClick={(e) => { e.stopPropagation(); handleActivateSystem(sys); }} className="text-[10px] text-muted-foreground hover:text-primary mt-1 underline">
-                             Set Active
-                          </button>
-                      )}
+                       )}
                   </div>
+                  
+                  <p className="font-bold text-base truncate pr-2">{sys.name}</p>
+                  
+                  {!sys.is_active && (
+                      <Button 
+                        size="sm" 
+                        variant="ghost" 
+                        onClick={(e) => { e.stopPropagation(); handleActivateSystem(sys); }} 
+                        className="mt-3 h-7 text-xs w-full border border-dashed border-muted-foreground/30 hover:border-primary hover:text-primary"
+                      >
+                         Activate for {sys.system_type}
+                      </Button>
+                  )}
                </div>
            ))}
        </div>

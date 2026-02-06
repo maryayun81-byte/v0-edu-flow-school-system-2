@@ -35,6 +35,7 @@ interface Exam {
   start_date: string;
   end_date: string;
   status: string;
+  system_type: 'CBC' | '8-4-4' | 'Combined';
   applicable_classes: string[];
 }
 
@@ -67,6 +68,7 @@ interface TeacherMarkEntryProps {
 }
 
 export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntryProps) {
+  const [selectedCurriculum, setSelectedCurriculum] = useState<string>("8-4-4");
   const [exams, setExams] = useState<Exam[]>([]);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
   const [assignedClasses, setAssignedClasses] = useState<Class[]>([]);
@@ -106,7 +108,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
     const { data } = await supabase
       .from("exams")
       .select("*")
-      .eq("status", "Closed")
+      .in("status", ["Active", "Closed"])
       .order("created_at", { ascending: false });
 
     if (data) setExams(data);
@@ -114,6 +116,12 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
 
   async function fetchAssignedClasses() {
     if (!selectedExam) return;
+
+    console.log('[DEBUG] fetchAssignedClasses called', {
+      teacherId,
+      selectedExam: selectedExam.exam_name,
+      applicable_classes: selectedExam.applicable_classes
+    });
 
     const { data } = await supabase
       .from("teacher_classes")
@@ -123,12 +131,20 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
       `)
       .eq("teacher_id", teacherId);
 
+    console.log('[DEBUG] teacher_classes query result:', data);
+
     if (data) {
       const classes = data
         .map((tc: any) => tc.classes)
-        .filter((c: Class) =>
-          selectedExam.applicable_classes.includes(c.id)
-        );
+        .filter((c: Class) => {
+            // RELAXED FILTER: 
+            // If applicable_classes is null/empty, allow ALL classes (Legacy support).
+            // If it HAS values, strict check.
+            if (!selectedExam.applicable_classes || selectedExam.applicable_classes.length === 0) return true;
+            return selectedExam.applicable_classes.includes(c.id);
+        });
+      
+      console.log('[DEBUG] Filtered classes:', classes);
       setAssignedClasses(classes);
     }
   }
@@ -173,13 +189,20 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
 
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, admission_number")
+      .select("id, full_name, admission_number, curriculum_type")
       .eq("form_class", className)
       .eq("role", "student")
       .order("full_name", { ascending: true });
 
     if (data) {
-      setStudents(data);
+       // Filter students by curriculum if defined
+       const filteredStudents = data.filter((s: any) => {
+           if (!selectedExam?.system_type) return true;
+           // If student has no curriculum set, assume 8-4-4 (legacy)
+           const studentSystem = s.curriculum_type || '8-4-4'; 
+           return studentSystem === selectedExam.system_type;
+       });
+      setStudents(filteredStudents);
       // Initialize marks map
       const initialMarks = new Map<string, MarkEntry>();
       data.forEach((student) => {
@@ -339,7 +362,30 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
       )}
 
       {/* Selection Controls */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+         {/* 1. Curriculum */}
+        <div className="space-y-2">
+            <Label>Curriculum *</Label>
+            <Select 
+                value={selectedCurriculum} 
+                onValueChange={(val) => {
+                    setSelectedCurriculum(val);
+                    setSelectedExam(null);
+                    setSelectedClass("");
+                    setSelectedSubject("");
+                }}
+            >
+              <SelectTrigger className="h-11 bg-muted border-border/50">
+                <SelectValue placeholder="Select Curriculum" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="8-4-4">8-4-4 (Forms)</SelectItem>
+                <SelectItem value="CBC">CBC (Grades)</SelectItem>
+              </SelectContent>
+            </Select>
+        </div>
+
+        {/* 2. Exam (Filtered by Curriculum) */}
         <div className="space-y-2">
           <Label>Select Exam *</Label>
           <Select
@@ -350,25 +396,32 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
               setSelectedClass("");
               setSelectedSubject("");
             }}
+            disabled={!selectedCurriculum}
           >
             <SelectTrigger className="h-11 bg-muted border-border/50">
               <SelectValue placeholder="Choose exam" />
             </SelectTrigger>
             <SelectContent>
-              {exams.map((exam) => (
+              {exams
+                .filter(e => e.system_type === selectedCurriculum || e.system_type === 'Combined')
+                .map((exam) => (
                 <SelectItem key={exam.id} value={exam.id}>
-                  {exam.exam_name} ({exam.term} {exam.academic_year})
+                  {exam.exam_name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
 
+        {/* 3. Class (Filtered by Exam & Curriculum) */}
         <div className="space-y-2">
           <Label>Select Class *</Label>
           <Select
             value={selectedClass}
-            onValueChange={setSelectedClass}
+            onValueChange={(val) => {
+                setSelectedClass(val);
+                setSelectedSubject("");
+            }}
             disabled={!selectedExam}
           >
             <SelectTrigger className="h-11 bg-muted border-border/50">
@@ -384,6 +437,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
           </Select>
         </div>
 
+        {/* 4. Subject */}
         <div className="space-y-2">
           <Label>Select Subject *</Label>
           <Select
@@ -429,7 +483,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
                 Student Marks ({students.length})
               </h3>
               <p className="text-sm text-muted-foreground">
-                Max Score: {maxScore} points
+                {selectedExam?.system_type === 'CBC' ? 'Rubric Assessment (4 points)' : `Max Score: ${maxScore} points`}
               </p>
             </div>
             {existingMarks.size > 0 && (
@@ -454,7 +508,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
                     Student Name
                   </th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
-                    Score (/{maxScore})
+                    {selectedExam?.system_type === 'CBC' ? 'Performance Level' : `Score (/${maxScore})`}
                   </th>
                   <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">
                     Remarks (Optional)
@@ -476,17 +530,34 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
                         {student.full_name}
                       </td>
                       <td className="px-4 py-3">
-                        <Input
-                          type="number"
-                          value={mark?.score || 0}
-                          onChange={(e) =>
-                            updateMark(student.id, "score", e.target.value)
-                          }
-                          className="h-9 w-24 bg-muted border-border/50"
-                          min={0}
-                          max={maxScore}
-                          step={0.5}
-                        />
+                        {selectedExam?.system_type === 'CBC' ? (
+                             <Select 
+                                value={mark?.score?.toString() || ""} 
+                                onValueChange={(val) => updateMark(student.id, "score", val)}
+                             >
+                                <SelectTrigger className="h-9 w-40 bg-muted border-border/50">
+                                   <SelectValue placeholder="Select Level" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                   <SelectItem value="4">EE (Exceeding)</SelectItem>
+                                   <SelectItem value="3">ME (Meeting)</SelectItem>
+                                   <SelectItem value="2">AE (Approaching)</SelectItem>
+                                   <SelectItem value="1">BE (Below)</SelectItem>
+                                </SelectContent>
+                             </Select>
+                        ) : (
+                            <Input
+                            type="number"
+                            value={mark?.score || 0}
+                            onChange={(e) =>
+                                updateMark(student.id, "score", e.target.value)
+                            }
+                            className="h-9 w-24 bg-muted border-border/50"
+                            min={0}
+                            max={maxScore}
+                            step={0.5}
+                            />
+                        )}
                       </td>
                       <td className="px-4 py-3">
                         <Input

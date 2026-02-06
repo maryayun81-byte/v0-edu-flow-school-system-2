@@ -20,7 +20,9 @@ import {
   GraduationCap,
   Menu,
   X,
-  MessageSquare
+  MessageSquare,
+  BarChart,
+  CreditCard
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
@@ -44,7 +46,6 @@ interface NavItem {
 
 const studentNavItems: NavItem[] = [
   { icon: <Home className="h-5 w-5" />, label: "Home", href: "/student/dashboard" },
-  { icon: <BookOpen className="h-5 w-5" />, label: "Notes", href: "/student/dashboard?tab=notes" },
   { icon: <Calendar className="h-5 w-5" />, label: "Schedule", href: "/student/dashboard?tab=timetable" },
   { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/dashboard?tab=quizzes" },
 ]
@@ -67,11 +68,15 @@ const adminNavItems: NavItem[] = [
 
 const moreMenuItems = {
   student: [
-    { icon: <User className="h-5 w-5" />, label: "Profile", href: "/student/dashboard?tab=id-card" },
-    { icon: <FileText className="h-5 w-5" />, label: "Assignments", href: "/student/dashboard?tab=assignments" },
-    { icon: <MessageSquare className="h-5 w-5" />, label: "Messages", href: "/student/dashboard?tab=messages" },
-    { icon: <Bell className="h-5 w-5" />, label: "Alerts", href: "/student/dashboard?tab=notifications" },
+    { icon: <Trophy className="h-5 w-5" />, label: "Quizzes", href: "/student/dashboard?tab=quizzes" },
+    { icon: <FileText className="h-5 w-5" />, label: "Notes", href: "/student/dashboard?tab=notes" },
     { icon: <Settings className="h-5 w-5" />, label: "Settings", href: "/student/dashboard?tab=settings" },
+    { icon: <User className="h-5 w-5" />, label: "ID Card", href: "/student/dashboard?tab=id-card" },
+    { icon: <Calendar className="h-5 w-5" />, label: "Events", href: "/student/dashboard?tab=events" },
+    { icon: <BarChart className="h-5 w-5" />, label: "Rankings", href: "/student/dashboard?tab=rankings" },
+    { icon: <CreditCard className="h-5 w-5" />, label: "Fees", href: "/student/dashboard?tab=fees" },
+    { icon: <GraduationCap className="h-5 w-5" />, label: "Results", href: "/student/dashboard?tab=results" },
+    { icon: <ClipboardList className="h-5 w-5" />, label: "Assignments", href: "/student/dashboard?tab=assignments" },
   ],
   teacher: [
     { icon: <Calendar className="h-5 w-5" />, label: "Timetable", href: "/teacher/timetable" },

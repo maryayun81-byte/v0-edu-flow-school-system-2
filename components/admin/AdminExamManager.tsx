@@ -39,6 +39,7 @@ interface Exam {
   start_date: string;
   end_date: string;
   status: "Draft" | "Active" | "Closed" | "Finalized";
+  system_type: "CBC" | "8-4-4" | "Combined";
   applicable_classes: string[];
   created_at: string;
   updated_at: string;
@@ -65,6 +66,7 @@ export default function AdminExamManager() {
   const [examName, setExamName] = useState("");
   const [academicYear, setAcademicYear] = useState(CURRENT_YEAR.toString());
   const [term, setTerm] = useState("");
+  const [systemType, setSystemType] = useState<"CBC" | "8-4-4" | "Combined">("8-4-4");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -120,6 +122,7 @@ export default function AdminExamManager() {
     setStartDate("");
     setEndDate("");
     setSelectedClasses([]);
+    setSystemType("8-4-4");
     setEditingExam(null);
   }
 
@@ -131,6 +134,7 @@ export default function AdminExamManager() {
     setStartDate(exam.start_date);
     setEndDate(exam.end_date);
     setSelectedClasses(exam.applicable_classes);
+    setSystemType(exam.system_type || "8-4-4");
     setShowCreateModal(true);
   }
 
@@ -152,6 +156,7 @@ export default function AdminExamManager() {
         term,
         start_date: startDate,
         end_date: endDate,
+        system_type: systemType,
         applicable_classes: selectedClasses,
       };
 
@@ -172,15 +177,20 @@ export default function AdminExamManager() {
         // Create new exam
         const { error } = await supabase.from("exams").insert([examData]);
 
-        if (error) throw error;
-      }
+        if (error) {
+             console.error("Exam Creation Error Details:", error);
+             throw error;
+        }
 
+        alert("Exam created successfully!");
+      }
+      
       setShowCreateModal(false);
       resetForm();
       fetchData();
     } catch (error: any) {
       console.error("Error saving exam:", error);
-      alert(`Failed to save exam: ${error.message}`);
+      alert(`Error saving exam: ${error.message || error.details || 'Check console for details'}`);
     }
   }
 
@@ -200,8 +210,14 @@ export default function AdminExamManager() {
         : `Change exam status to ${newStatus}?`;
 
     if (!confirm(confirmMessage)) return;
-
+    
     try {
+      // 1. Optimistic Update (Immediate UI Change)
+      setExams(currentExams => currentExams.map(e => 
+        e.id === examId ? { ...e, status: newStatus } : e
+      ));
+
+      // 2. Perform API Update
       const { error } = await supabase
         .from("exams")
         .update({
@@ -212,19 +228,32 @@ export default function AdminExamManager() {
         })
         .eq("id", examId);
 
-      if (error) throw error;
+      console.log('Update status result:', { error });
+      
+      if (error) {
+        // Revert Optimistic Update on Error
+        setExams(exams); 
+        throw error;
+      }
 
-      // Log audit event
-      await supabase.rpc("log_exam_audit", {
-        p_exam_id: examId,
-        p_action_type: `exam_${newStatus.toLowerCase()}`,
-        p_details: { previous_status: exam.status, new_status: newStatus },
-      });
+      // 3. Log Audit (Non-blocking)
+      try {
+        await supabase.rpc("log_exam_audit", {
+            p_exam_id: examId,
+            p_action_type: `exam_${newStatus.toLowerCase()}`,
+            p_details: { previous_status: exam.status, new_status: newStatus },
+        });
+      } catch (auditError) {
+        console.error("Audit log failed (non-blocking):", auditError);
+      }
 
-      fetchData();
+      // 4. Background Refresh
+      fetchData(); 
+      // alert(`Exam status updated to ${newStatus}`); // Removed to make it smoother
     } catch (error: any) {
       console.error("Error updating status:", error);
-      alert(`Failed to update status: ${error.message}`);
+      alert(`Failed to update status: ${error.message || 'Unknown error'}`);
+      fetchData(); // Sync state just in case
     }
   }
 
@@ -326,6 +355,31 @@ export default function AdminExamManager() {
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
+                  <Label>System Type *</Label>
+                  <Select 
+                    value={systemType} 
+                    onValueChange={(val: 'CBC' | '8-4-4' | 'Combined') => {
+                        setSystemType(val);
+                        // If Combined, select ALL classes by default or let user choose from all
+                        if (val === 'Combined') {
+                            setSelectedClasses([]); // Reset to let them choose, or could pre-select all
+                        } else {
+                            setSelectedClasses([]); 
+                        }
+                    }}
+                  >
+                    <SelectTrigger className="h-11 bg-muted border-border/50">
+                      <SelectValue placeholder="Select System" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="8-4-4">8-4-4 (Forms)</SelectItem>
+                      <SelectItem value="CBC">CBC (Grades)</SelectItem>
+                      <SelectItem value="Combined">Global Event (All Classes)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="space-y-2">
                   <Label>Academic Year *</Label>
                   <Select value={academicYear} onValueChange={setAcademicYear}>
                     <SelectTrigger className="h-11 bg-muted border-border/50">
@@ -340,7 +394,9 @@ export default function AdminExamManager() {
                     </SelectContent>
                   </Select>
                 </div>
+              </div>
 
+              <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Term *</Label>
                   <Select value={term} onValueChange={setTerm}>
@@ -356,9 +412,7 @@ export default function AdminExamManager() {
                     </SelectContent>
                   </Select>
                 </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Start Date *</Label>
                   <Input
@@ -381,9 +435,16 @@ export default function AdminExamManager() {
               </div>
 
               <div className="space-y-2">
-                <Label>Applicable Classes *</Label>
+                <Label>Applicable Classes ({systemType}) *</Label>
                 <div className="grid grid-cols-2 gap-2 max-h-48 overflow-y-auto p-3 bg-muted/50 rounded-lg border border-border/50">
-                  {classes.map((cls) => (
+                  {classes
+                    .filter(cls => {
+                        const nameLower = cls.name.toLowerCase();
+                        if (systemType === 'CBC') return nameLower.includes('grade');
+                        if (systemType === '8-4-4') return nameLower.includes('form');
+                        return true; // Combined shows all
+                    })
+                    .map((cls) => (
                     <div
                       key={cls.id}
                       onClick={() => toggleClassSelection(cls.id)}
@@ -402,13 +463,20 @@ export default function AdminExamManager() {
                 </div>
               </div>
 
-              <Button
-                onClick={handleCreateOrUpdateExam}
-                className="w-full h-11 bg-primary"
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {editingExam ? "Update Exam" : "Create Exam"}
-              </Button>
+              <div className="flex items-center justify-end gap-3 pt-6">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowCreateModal(false);
+                    resetForm();
+                  }}
+                >
+                  Cancel
+                </Button>
+                <Button onClick={handleCreateOrUpdateExam} className="bg-primary">
+                  {editingExam ? "Update Exam" : "Create Exam"}
+                </Button>
+              </div>
             </div>
           </div>
         </div>
@@ -452,9 +520,16 @@ export default function AdminExamManager() {
                   <h3 className="font-semibold text-foreground mb-1">
                     {exam.exam_name}
                   </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {exam.term} • {exam.academic_year}
-                  </p>
+                  <div className="flex flex-wrap gap-2 text-sm text-muted-foreground mb-1">
+                     <span>{exam.term} • {exam.academic_year}</span>
+                     <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${
+                         exam.system_type === 'CBC' ? 'border-purple-500 text-purple-600 bg-purple-50' : 
+                         exam.system_type === 'Combined' ? 'border-amber-500 text-amber-600 bg-amber-50' :
+                         'border-blue-500 text-blue-600 bg-blue-50'
+                     }`}>
+                        {exam.system_type || '8-4-4'}
+                     </span>
+                  </div>
                 </div>
                 <span
                   className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${getStatusColor(

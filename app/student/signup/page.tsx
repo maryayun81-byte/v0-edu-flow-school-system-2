@@ -19,10 +19,18 @@ import {
   CheckCircle2,
   Copy,
   AtSign,
+  BookOpen
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,6 +42,7 @@ export default function StudentSignup() {
   const [fullName, setFullName] = useState("");
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
+  const [curriculumType, setCurriculumType] = useState<string>("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
@@ -56,6 +65,12 @@ export default function StudentSignup() {
 
     if (!fullName.trim()) {
       setError("Full name is required");
+      setLoading(false);
+      return;
+    }
+
+    if (!curriculumType) {
+      setError("Please select a curriculum type");
       setLoading(false);
       return;
     }
@@ -134,6 +149,7 @@ export default function StudentSignup() {
           email: email.trim() || null,
           role: "student",
           admission_number: newAdmissionNumber,
+          curriculum_type: curriculumType || '8-4-4',
           theme: "dark",
           profile_completed: false,
           created_at: new Date().toISOString(),
@@ -381,6 +397,27 @@ export default function StudentSignup() {
                 </div>
                 <p className="text-xs text-muted-foreground">
                   If you have an email, enter it here. Not required for signup.
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="curriculum" className="text-sm text-foreground">
+                  Curriculum Type <span className="text-destructive">*</span>
+                </Label>
+                <div className="relative">
+                  <Select value={curriculumType} onValueChange={setCurriculumType} required>
+                    <SelectTrigger className="h-12 bg-input border-border/50 focus:border-chart-3 focus:ring-chart-3/20 pl-11">
+                      <SelectValue placeholder="Select your curriculum" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="8-4-4">8-4-4 (Form 1 - 4)</SelectItem>
+                      <SelectItem value="CBC">CBC (Grade 1 - 9)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <BookOpen className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground pointer-events-none" />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                    Select <strong>8-4-4</strong> for High School (Forms) or <strong>CBC</strong> for Junior School (Grades).
                 </p>
               </div>
 

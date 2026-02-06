@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import {
   GraduationCap,
@@ -43,6 +43,7 @@ import MessagingCenter from "@/components/MessagingCenter";
 import { StudentDashboardSkeleton } from "@/components/DashboardSkeleton";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
 import StudentResults from "@/components/StudentResults";
+import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
 
 
 const supabase = createClient(
@@ -115,6 +116,7 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 
 export default function StudentDashboard() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -131,11 +133,18 @@ export default function StudentDashboard() {
   const [notificationsList, setNotificationsList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<
     "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications"
-  >("overview");
+  >((searchParams?.get("tab") as any) || "overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [transcripts, setTranscripts] = useState<any[]>([]);
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
   const [transcriptFilters, setTranscriptFilters] = useState({ year: "", term: "", exam: "" });
+
+  useEffect(() => {
+    const tab = searchParams?.get("tab");
+    if (tab) {
+      setActiveTab(tab as any);
+    }
+  }, [searchParams]);
 
   useEffect(() => {
     // Auth is handled by layout.tsx - just load profile
@@ -295,7 +304,27 @@ export default function StudentDashboard() {
     ]);
 
     if (notesRes.data) setNotes(notesRes.data);
-    if (assignmentsRes.data) setAssignments(assignmentsRes.data);
+    if (notesRes.data) setNotes(notesRes.data);
+    
+    // Process assignments to check for submissions
+    if (assignmentsRes.data) {
+        // We need to know which ones are submitted.
+        // For simple widget logic, we'll optimistically assume 'is_completed' means 'has submission'
+        // But since we can't join easily in one go for all (without RPC), we might do a quick check or just fetch all submissions for this user?
+        // Let's fetch the user's submissions to map status
+        const { data: subs } = await supabase
+            .from('student_submissions')
+            .select('assignment_id')
+            .eq('student_id', currentProfile.id);
+        
+        const submittedIds = new Set(subs?.map(s => s.assignment_id) || []);
+        
+        const processedAssignments = assignmentsRes.data.map((a: any) => ({
+            ...a,
+            is_completed: submittedIds.has(a.id)
+        }));
+        setAssignments(processedAssignments);
+    }
     
     // Fetch timetable sessions for student's class
     if (currentProfile?.form_class) {
@@ -525,7 +554,7 @@ export default function StudentDashboard() {
           {[
             { id: "overview", label: "Overview", icon: TrendingUp },
             { id: "notes", label: "Notes", icon: FileText },
-            { id: "assignments", label: "Tasks", icon: Target },
+            { id: "assignments", label: "Assignments", icon: Target },
             { id: "timetable", label: "Schedule", icon: Calendar },
             { id: "quizzes", label: "Quizzes", icon: Brain },
             { id: "results", label: "Results", icon: Trophy },
@@ -628,7 +657,7 @@ export default function StudentDashboard() {
                 </div>
                 <div className="grid grid-cols-3 gap-3">
                   {[
-                    { id: "assignments", label: "Tasks", icon: Target },
+                    { id: "assignments", label: "Assignments", icon: Target },
                     { id: "quizzes", label: "Quizzes", icon: Brain },
                     { id: "results", label: "Results", icon: Trophy },
                     { id: "notifications", label: "Alerts", icon: Bell },
@@ -817,55 +846,12 @@ export default function StudentDashboard() {
         )}
 
         {/* Assignments Tab */}
-        {activeTab === "assignments" && (
-          <div className="space-y-4">
-            {assignments.length === 0 ? (
-              <div className="text-center py-12">
-                <Target className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No assignments available yet</p>
-              </div>
-            ) : (
-              assignments.map((assignment) => (
-                <div
-                  key={assignment.id}
-                  className={`bg-card border rounded-xl p-5 ${
-                    assignment.is_completed
-                      ? "border-accent/50 bg-accent/5"
-                      : new Date(assignment.due_date) < new Date()
-                      ? "border-destructive/50 bg-destructive/5"
-                      : "border-border/50"
-                  }`}
-                >
-                  <div className="flex items-start justify-between">
-                    <div>
-                      <h3 className="font-semibold text-foreground">{assignment.title}</h3>
-                      <p className="text-sm text-muted-foreground mt-1">
-                        {assignment.description}
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-2">
-                        Due: {new Date(assignment.due_date).toLocaleDateString()}
-                      </p>
-                    </div>
-                    <span
-                      className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        assignment.is_completed
-                          ? "bg-accent/20 text-accent"
-                          : new Date(assignment.due_date) < new Date()
-                          ? "bg-destructive/20 text-destructive"
-                          : "bg-chart-3/20 text-chart-3"
-                      }`}
-                    >
-                      {assignment.is_completed
-                        ? "Completed"
-                        : new Date(assignment.due_date) < new Date()
-                        ? "Overdue"
-                        : "Pending"}
-                    </span>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        {activeTab === "assignments" && profile && (
+          <StudentAssignmentsManager 
+            studentId={profile.id}
+            studentClass={profile.form_class}
+            className="w-full"
+          />
         )}
 
         {/* Notifications Tab */}

@@ -62,6 +62,7 @@ interface Transcript {
   student_id: string;
   student_name: string;
   admission_number: string;
+  curriculum_type?: 'CBC' | '8-4-4'; // Added
   total_score: number;
   average_score: number;
   overall_grade: string;
@@ -113,6 +114,7 @@ export default function AdminTranscriptManager() {
   const [loading, setLoading] = useState(false);
   const [exams, setExams] = useState<Exam[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
+  const [selectedCurriculum, setSelectedCurriculum] = useState<string>("8-4-4"); // Default
   const [selectedExam, setSelectedExam] = useState<string>("");
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [readiness, setReadiness] = useState<TranscriptReadiness | null>(null);
@@ -138,18 +140,26 @@ export default function AdminTranscriptManager() {
   }, []);
 
   async function fetchGradingSystem() {
-      // 1. Get active system
-      const { data: system } = await supabase.from("grading_systems").select("id").eq("is_active", true).single();
-      if (!system) return;
+      // 1. Get ALL active systems
+      const { data: systems } = await supabase.from("grading_systems").select("id, system_type").eq("is_active", true);
+      if (!systems) return;
 
-      // 2. Get scales
+      // 2. Get scales for all active systems
+      const systemIds = systems.map(s => s.id);
+      if (systemIds.length === 0) return;
+
       const { data: scales } = await supabase
         .from("grading_scales")
         .select("*")
-        .eq("grading_system_id", system.id)
+        .in("grading_system_id", systemIds)
         .order("min_percentage", { ascending: false });
       
-      if (scales) setGradingScales(scales);
+      if (scales) {
+          // Store with system_id mapping for easy lookup
+          setGradingScales(scales);
+          // Also store systems map if needed, or just rely on finding by type
+          // We'll store formatted systems in a ref or state if complex, but simple lookup is fine
+      }
   }
 
   async function fetchActiveSignature() {
@@ -177,6 +187,8 @@ export default function AdminTranscriptManager() {
       .from("classes")
       .select("*")
       .order("form_level", { ascending: true });
+    
+    console.log('[DEBUG] AdminTranscriptManager - fetchClasses result:', data);
     if (data) setClasses(data);
   }
   
@@ -276,18 +288,26 @@ export default function AdminTranscriptManager() {
 
     setLoading(true);
     try {
+      // Fetch students with curriculum_type
       const { data: students } = await supabase
         .from("profiles")
-        .select("id, full_name, admission_number")
+        .select("id, full_name, admission_number, curriculum_type")
         .eq("form_class", classes.find((c) => c.id === selectedClass)?.name);
 
       if (!students) return;
 
+      // Fetch active systems map
+      const { data: activeSystems } = await supabase.from("grading_systems").select("id, system_type").eq("is_active", true);
+      
       const generatedTranscripts: Transcript[] = [];
 
       for (const student of students) {
         // preserve ID/Status if we already have it
         const existing = transcripts.find(t => t.student_id === student.id);
+        
+        // Determing Grading System for this student
+        const curriculum = student.curriculum_type || '8-4-4'; // Default
+        const activeSystem = activeSystems?.find(s => s.system_type === curriculum);
         
         // Get all marks for this student in this exam
         const { data: marks } = await supabase
@@ -305,28 +325,50 @@ export default function AdminTranscriptManager() {
 
         if (!marks || marks.length === 0) continue;
 
-        // Calculate totals
+        // Calculate totals (CBC might ignore these for display, but we compute them)
         const totalScore = marks.reduce((sum, m) => sum + m.score, 0);
         const totalMaxScore = marks.reduce((sum, m) => sum + m.max_score, 0);
         const averageScore = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
 
-        const items: TranscriptItem[] = marks.map((m: any) => ({
-          subject_id: m.subject_id,
-          subject_name: m.subjects.name,
-          score: m.score,
-          max_score: m.max_score,
-          grade: m.grade,
-          teacher_remarks: m.remarks || "",
-        }));
+        // Calculate Items with Student's System
+        const items: TranscriptItem[] = marks.map((m: any) => {
+            // Re-calculate grade if system is found, else use stored or fallback
+            // Note: Marks table 'grade' might be stale if system changed, so we recalc
+            let grade = m.grade;
+            if (activeSystem) {
+                const percentage = (m.score / m.max_score) * 100;
+                grade = calculateGrade(percentage, activeSystem.id);
+            }
+
+            return {
+              subject_id: m.subject_id,
+              subject_name: m.subjects.name,
+              score: m.score, // CBC will hide this in UI
+              max_score: m.max_score,
+              grade: grade, 
+              teacher_remarks: m.remarks || "",
+            };
+        });
+
+        // Calculate Overall Grade
+        // For CBC: Maybe Mode? Or Average? Requirement says "No marks". 
+        // We'll use the same average-based logic for now but map to the Scale (e.g. 80% avg = EE)
+        let overallGrade = "E";
+        if (activeSystem) {
+             overallGrade = calculateGrade(averageScore, activeSystem.id);
+        } else {
+             overallGrade = calculateGrade(averageScore); // Fallback
+        }
 
         generatedTranscripts.push({
           id: existing?.id, // Keep existing ID if any
           student_id: student.id,
           student_name: student.full_name,
           admission_number: student.admission_number,
+          curriculum_type: student.curriculum_type || '8-4-4', // Added curriculum type
           total_score: totalScore,
           average_score: averageScore,
-          overall_grade: calculateGrade(averageScore),
+          overall_grade: overallGrade,
           class_position: 0, 
           admin_remarks: existing?.admin_remarks || "",
           status: existing?.status || "Draft", // Keep status
@@ -335,22 +377,14 @@ export default function AdminTranscriptManager() {
         });
       }
 
-      // Sort and Rank
+      // Sort and Rank (Only relevant for 8-4-4 really, but we'll do it for all)
       generatedTranscripts.sort((a, b) => b.average_score - a.average_score);
       generatedTranscripts.forEach((t, index) => {
         t.class_position = index + 1;
       });
 
       setTranscripts(generatedTranscripts);
-      
-      // Autosave drafts to persistence? Maybe too heavy. 
-      // For now, these are in-memory until "Publish". 
-      // But user wanted persistence. 
-      // Ideally "Generate" should UPSERT to DB immediately as Drafts.
-      // Let's do that for better UX.
       await saveDraftsBatch(generatedTranscripts);
-      
-      // Reload to get precise state
       await fetchExistingTranscripts();
 
     } catch (error) {
@@ -511,9 +545,15 @@ export default function AdminTranscriptManager() {
     }
   }
 
-  function calculateGrade(percentage: number): string {
+  function calculateGrade(percentage: number, systemId: string = ''): string {
     if (gradingScales.length > 0) {
-        const match = gradingScales.find(s => percentage >= s.min_percentage && percentage <= s.max_percentage);
+        // Filter scales by system if provided, else use all (unsafe if multiple systems)
+        // If systemId is NOT provided, we fall back to finding ANY match (legacy)
+        const relevantScales = systemId 
+            ? gradingScales.filter(s => (s as any).grading_system_id === systemId)
+            : gradingScales;
+
+        const match = relevantScales.find(s => percentage >= s.min_percentage && percentage <= s.max_percentage);
         return match ? match.grade_label : "E";
     }
     
@@ -808,49 +848,80 @@ export default function AdminTranscriptManager() {
         </div>
       </div>
 
-      {/* NEW FILTERS: Class First */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-card border border-border/50 rounded-xl p-6 shadow-sm">
+      {/* NEW FILTERS: Curriculum -> Class -> Exam */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 bg-card border border-border/50 rounded-xl p-6 shadow-sm">
+        
+        {/* 1. Curriculum */}
         <div className="space-y-4">
-          <Label className="text-base font-semibold">1. Select Class</Label>
-          <Select value={selectedClass} onValueChange={(val) => { 
-                setSelectedClass(val); 
-                setSelectedExam(""); // Reset exam when class changes to avoid invalid state
-            }}>
+          <Label className="text-base font-semibold">1. Select Curriculum</Label>
+          <Select 
+            value={selectedCurriculum} 
+            onValueChange={(val) => {
+                setSelectedCurriculum(val);
+                setSelectedClass(""); // Reset class
+                setSelectedExam(""); // Reset exam
+            }}
+          >
             <SelectTrigger className="h-12 bg-muted/50 border-border/50 text-base">
-              <SelectValue placeholder="First, choose a class..." />
+                <SelectValue placeholder="Select Curriculum" />
             </SelectTrigger>
             <SelectContent>
-              {classes.map((cls) => (
-                <SelectItem key={cls.id} value={cls.id}>
-                  {cls.name} <span className="text-muted-foreground text-xs ml-2">({cls.form_level})</span>
-                </SelectItem>
-              ))}
+                <SelectItem value="8-4-4">8-4-4 (Forms)</SelectItem>
+                <SelectItem value="CBC">CBC (Grades)</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
+        {/* 2. Class (Filtered) */}
         <div className="space-y-4">
-          <Label className="text-base font-semibold">2. Select Exam</Label>
-          <Select value={selectedExam} onValueChange={setSelectedExam} disabled={!selectedClass}>
+          <Label className="text-base font-semibold">2. Select Class</Label>
+          <Select 
+            value={selectedClass} 
+            onValueChange={(val) => { 
+                setSelectedClass(val); 
+                setSelectedExam(""); 
+            }}
+            disabled={!selectedCurriculum}
+          >
             <SelectTrigger className="h-12 bg-muted/50 border-border/50 text-base">
-              <SelectValue placeholder={!selectedClass ? "Select a class first..." : "Now, choose an exam..."} />
+              <SelectValue placeholder="Choose a class..." />
             </SelectTrigger>
             <SelectContent>
-              {exams.filter(e => 
-                  // If exam has applicable_classes, allow only if selectedClass is in it.
-                  // If applicable_classes is empty or undefined, show all (legacy support)
-                  !e.applicable_classes || 
-                  e.applicable_classes.length === 0 || 
-                  e.applicable_classes.includes(selectedClass)
-              ).map((exam) => (
+                {classes
+                    .filter(c => {
+                        // Case-insensitive filtering to handle "form 3", "Form 3", "FORM 3", etc.
+                        const nameLower = c.name.toLowerCase();
+                        if (selectedCurriculum === 'CBC') return nameLower.includes('grade');
+                        if (selectedCurriculum === '8-4-4') return nameLower.includes('form');
+                        return true;
+                    })
+                    .map((cls) => (
+                  <SelectItem key={cls.id} value={cls.id}>
+                    {cls.name} <span className="text-muted-foreground text-xs ml-2">({cls.form_level})</span>
+                  </SelectItem>
+                ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* 3. Exam */}
+        <div className="space-y-4">
+          <Label className="text-base font-semibold">3. Select Exam</Label>
+          <Select value={selectedExam} onValueChange={setSelectedExam} disabled={!selectedClass}>
+            <SelectTrigger className="h-12 bg-muted/50 border-border/50 text-base">
+              <SelectValue placeholder="Then, choose exam..." />
+            </SelectTrigger>
+            <SelectContent>
+              {exams.map((exam) => (
                 <SelectItem key={exam.id} value={exam.id}>
-                  {exam.exam_name} ({exam.term} {exam.academic_year})
+                  {exam.exam_name}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
         </div>
       </div>
+
 
       {/* Readiness Status */}
       {readiness && (

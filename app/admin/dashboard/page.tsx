@@ -92,6 +92,7 @@ interface Student {
   school_name: string;
   form_class: string;
   subjects: string[];
+  curriculum_type?: 'CBC' | '8-4-4';
   created_at: string;
 }
 
@@ -129,6 +130,7 @@ export default function AdminDashboard() {
   const [selectedTeacher, setSelectedTeacher] = useState("");
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  const [assignmentCurriculum, setAssignmentCurriculum] = useState<string>("8-4-4"); // For assignment modal
 
   useEffect(() => {
     // Auth is handled by layout.tsx - just fetch data
@@ -179,7 +181,7 @@ export default function AdminDashboard() {
     // Fetch students
     const { data: studentsData } = await supabase
       .from("profiles")
-      .select("id, full_name, admission_number, school_name, form_class, subjects, created_at")
+      .select("id, full_name, admission_number, school_name, form_class, subjects, curriculum_type, created_at")
       .eq("role", "student")
       .order("created_at", { ascending: false });
     if (studentsData) setStudents(studentsData);
@@ -276,6 +278,22 @@ export default function AdminDashboard() {
       console.error("Error deleting user:", error);
       alert("Failed to delete user. You may not have permission or there are dependencies.");
     }
+  }
+
+  async function handleUpdateCurriculum(studentId: string, currentType: string) {
+      const newType = currentType === 'CBC' ? '8-4-4' : 'CBC';
+      if (!confirm(`Switch student curriculum to ${newType}?\n\nWARNING: This will affect their transcript format and grading logic. Ensure no data conflicts exist.`)) return;
+      
+      try {
+          const { error } = await supabase.from("profiles").update({ curriculum_type: newType }).eq("id", studentId);
+          if (error) throw error;
+          
+          // Log audit (optional, or rely on DB trigger if implemented, but we'll do simplistic client-logging if needed or just trust the action)
+          // For now, simple success feedback
+          fetchData();
+      } catch (e: any) {
+          alert("Failed to update curriculum: " + e.message);
+      }
   }
 
   const filteredTeachers = teachers.filter(t =>
@@ -423,20 +441,47 @@ export default function AdminDashboard() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label>Select Class</Label>
-                <Select value={selectedClass} onValueChange={setSelectedClass}>
-                  <SelectTrigger className="h-11 bg-muted border-border/50">
-                    <SelectValue placeholder="Choose a class" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {classes.map(cls => (
-                      <SelectItem key={cls.id} value={cls.id}>
-                        {cls.name} ({cls.form_level})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Assign Curriculum</Label>
+                    <Select 
+                        value={assignmentCurriculum} 
+                        onValueChange={(val) => {
+                            setAssignmentCurriculum(val);
+                            setSelectedClass(""); // Reset class
+                        }}
+                    >
+                      <SelectTrigger className="h-11 bg-muted border-border/50">
+                        <SelectValue placeholder="Select Curriculum" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="8-4-4">8-4-4 (Forms)</SelectItem>
+                        <SelectItem value="CBC">CBC (Grades)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Select Class</Label>
+                    <Select value={selectedClass} onValueChange={setSelectedClass} disabled={!assignmentCurriculum}>
+                      <SelectTrigger className="h-11 bg-muted border-border/50">
+                        <SelectValue placeholder="Choose a class" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {classes
+                            .filter(c => {
+                                if (assignmentCurriculum === 'CBC') return c.name.startsWith('Grade');
+                                if (assignmentCurriculum === '8-4-4') return c.name.startsWith('Form');
+                                return true;
+                            })
+                            .map(cls => (
+                          <SelectItem key={cls.id} value={cls.id}>
+                            {cls.name} ({cls.form_level})
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
               </div>
 
               <div className="space-y-2">
@@ -772,6 +817,7 @@ export default function AdminDashboard() {
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Name</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Admission No.</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Class</th>
+                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Curriculum</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">School</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Subjects</th>
                     <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Actions</th>
@@ -783,6 +829,17 @@ export default function AdminDashboard() {
                       <td className="px-4 py-3 font-medium text-foreground">{student.full_name}</td>
                       <td className="px-4 py-3 text-sm font-mono text-chart-3">{student.admission_number}</td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{student.form_class}</td>
+                      <td className="px-4 py-3">
+                         <span 
+                            onClick={() => handleUpdateCurriculum(student.id, student.curriculum_type || '8-4-4')}
+                            className={`
+                              cursor-pointer px-2 py-1 rounded text-xs font-bold border transition-colors
+                              ${student.curriculum_type === 'CBC' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}
+                            `}
+                         >
+                            {student.curriculum_type || '8-4-4'}
+                         </span>
+                      </td>
                       <td className="px-4 py-3 text-sm text-muted-foreground">{student.school_name}</td>
                       <td className="px-4 py-3">
                         <div className="flex flex-wrap gap-1">

@@ -17,7 +17,12 @@ import {
   Keyboard,
   Eraser,
   GraduationCap,
-  Pen
+  Pen,
+  Search,
+  MoreHorizontal,
+  Shield,
+  UserCog,
+  UserMinus
 } from "lucide-react";
 import GradingSystemManager from "./GradingSystemManager";
 import SignatureManager from "./SignatureManager";
@@ -27,6 +32,23 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Badge } from "@/components/ui/badge";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import {
   Select,
@@ -135,6 +157,77 @@ export default function AdminSettingsTab() {
     
     if (data) setAdmins(data as any);
   }
+
+  // User Search State
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [isSearching, setIsSearching] = useState(false);
+  
+  // User Management State
+  const [selectedUser, setSelectedUser] = useState<any>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+
+  async function handleUpdateRole(userId: string, newRole: 'admin' | 'teacher' | 'student') {
+      setActionLoading(true);
+      try {
+          const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
+          if (error) throw error;
+          
+          await fetchAdmins(); // Refresh admin list
+          
+          // If we are searching, update the search result too
+          setSearchResults(prev => prev.map(p => p.id === userId ? { ...p, role: newRole } : p));
+          
+          alert(`User role updated to ${newRole}`);
+      } catch (e: any) {
+          console.error(e);
+          alert("Failed to update role: " + e.message);
+      } finally {
+          setActionLoading(false);
+          setSelectedUser(null);
+      }
+  }
+
+  async function handleDeleteUser(userId: string) {
+      if (!confirm("Are you sure you want to DELETE this user? This action cannot be undone.")) return;
+      
+      setActionLoading(true);
+      try {
+          const { error } = await supabase.from('profiles').delete().eq('id', userId);
+          if (error) throw error;
+          
+          alert("User profile deleted.");
+          fetchAdmins();
+          setSearchResults(prev => prev.filter(p => p.id !== userId));
+      } catch (e: any) {
+          console.error("Delete failed", e);
+          alert("Could not delete user. You may need super-admin privileges.");
+      } finally {
+          setActionLoading(false);
+          setSelectedUser(null);
+      }
+  }
+
+  const handleSearchUser = async (query: string) => {
+      if (query.length < 2) {
+          setSearchResults([]);
+          return;
+      }
+      setIsSearching(true);
+      try {
+          const { data } = await supabase
+            .from('profiles')
+            .select('*')
+            .or(`full_name.ilike.%${query}%,email.ilike.%${query}%`)
+            .neq('role', 'admin') // Don't show existing admins
+            .limit(5);
+          
+          setSearchResults(data || []);
+      } catch (e) {
+          console.error(e);
+      } finally {
+          setIsSearching(false);
+      }
+  };
 
   // Signature States
   const [signatureMode, setSignatureMode] = useState<'draw' | 'type'>('draw');
@@ -319,22 +412,41 @@ export default function AdminSettingsTab() {
       </div>
 
       <Tabs defaultValue="branding" className="w-full">
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="branding" className="flex items-center gap-2">
-             <Settings className="w-4 h-4" /> Global Branding
-          </TabsTrigger>
-          <TabsTrigger value="grading" className="flex items-center gap-2">
-             <GraduationCap className="w-4 h-4" /> Grading System
-          </TabsTrigger>
-          <TabsTrigger value="signatures" className="flex items-center gap-2">
-             <Pen className="w-4 h-4" /> Signatures
-          </TabsTrigger>
-          <TabsTrigger value="themes" className="flex items-center gap-2">
-             <Palette className="w-4 h-4" /> Transcript Themes
-          </TabsTrigger>
-          <TabsTrigger value="admins" className="flex items-center gap-2">
-             <Users className="w-4 h-4" /> Admin Users
-          </TabsTrigger>
+        <TabsList className="w-full flex justify-start overflow-x-auto no-scrollbar bg-transparent p-0 border-b border-white/5 space-x-2 mb-8 z-0">
+          {[
+              { id: 'branding', icon: Settings, label: 'Branding' },
+              { id: 'grading', icon: GraduationCap, label: 'Grading' },
+              { id: 'signatures', icon: Pen, label: 'Signatures' },
+              { id: 'themes', icon: Palette, label: 'Themes' },
+              { id: 'admins', icon: Users, label: 'Admins' },
+          ].map(tab => (
+              <TabsTrigger 
+                  key={tab.id}
+                  value={tab.id} 
+                  className="
+                    relative flex-shrink-0 px-6 py-3 rounded-none bg-transparent 
+                    data-[state=active]:bg-transparent 
+                    data-[state=active]:shadow-none
+                    data-[state=active]:text-indigo-400
+                    text-muted-foreground
+                    group
+                    transition-all
+                  "
+              >
+                  <span className="flex items-center gap-2 relative z-10 transition-transform group-data-[state=active]:scale-105">
+                     <tab.icon className="w-4 h-4" /> 
+                     <span className="font-medium">{tab.label}</span>
+                  </span>
+                  
+                  {/* Premium Indicator Line */}
+                  <span className="
+                      absolute bottom-0 left-0 w-full h-0.5 bg-indigo-500 scale-x-0 transition-transform duration-300 ease-out origin-left
+                      group-data-[state=active]:scale-x-100
+                      group-hover:scale-x-50
+                      group-hover:bg-indigo-500/50
+                  "/>
+              </TabsTrigger>
+          ))}
         </TabsList>
 
         <TabsContent value="branding" className="space-y-4 py-4">
@@ -564,50 +676,160 @@ export default function AdminSettingsTab() {
         </TabsContent>
 
         {/* ADMINS TAB */}
-        <TabsContent value="admins" className="space-y-4 py-4">
-          <div className="bg-card border border-border/50 rounded-xl p-6 space-y-6">
-            <div className="flex justify-between items-center">
-              <h3 className="font-semibold flex items-center gap-2">
-                <Users className="w-4 h-4" /> Admin Users
-              </h3>
-            </div>
+        <TabsContent value="admins" className="space-y-4 py-4 animate-in slide-in-from-right-2 duration-300">
+          <div className="grid lg:grid-cols-2 gap-6">
             
-            <div className="p-4 border border-border rounded-lg bg-muted/20">
-              <h4 className="font-medium mb-3 text-sm">Grant Admin Access</h4>
-              <div className="flex flex-col md:flex-row gap-3">
-                <Input 
-                  placeholder="Full Name" 
-                  value={newAdminName} 
-                  onChange={e => setNewAdminName(e.target.value)} 
-                />
-                <Input 
-                  placeholder="Email Address" 
-                  value={newAdminEmail} 
-                  onChange={e => setNewAdminEmail(e.target.value)} 
-                />
-                <Button onClick={handleInviteAdmin} disabled={inviteLoading} className="whitespace-nowrap">
-                   <UserPlus className="w-4 h-4 mr-2" />
-                   Add Admin
-                </Button>
-              </div>
-              <p className="text-xs text-muted-foreground mt-2">
-                * User must already be signed up to be promoted immediately.
-              </p>
+            {/* LEFT COL: Manage Existing Admins */}
+            <div className="bg-card/50 backdrop-blur-sm border border-border/50 rounded-xl p-6 space-y-6 shadow-sm">
+                <div className="flex items-center justify-between">
+                    <div>
+                         <h3 className="font-semibold text-lg flex items-center gap-2">
+                            <Users className="w-5 h-5 text-indigo-500" /> Current Admins
+                        </h3>
+                        <p className="text-sm text-muted-foreground">Users with full system access</p>
+                    </div>
+                    <Badge variant="secondary" className="px-3">{admins.length}</Badge>
+                </div>
+
+                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {admins.map(admin => (
+                        <div key={admin.id} className="group flex items-center justify-between p-4 bg-background border rounded-lg hover:border-primary/30 transition-all shadow-sm">
+                            <div className="flex items-center gap-3">
+                                <div className="h-10 w-10 rounded-full bg-indigo-500/10 text-indigo-600 flex items-center justify-center font-bold">
+                                    {admin.full_name.charAt(0)}
+                                </div>
+                                <div>
+                                    <p className="font-medium text-sm">{admin.full_name}</p>
+                                    <p className="text-xs text-muted-foreground">{admin.email}</p>
+                                </div>
+                            </div>
+                            
+                            <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                    <Button variant="ghost" size="icon" className="h-8 w-8">
+                                        <MoreHorizontal className="w-4 h-4" />
+                                    </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                    <DropdownMenuLabel>Manage Access</DropdownMenuLabel>
+                                    <DropdownMenuItem onClick={() => handleUpdateRole(admin.id, 'student')}>
+                                        <UserMinus className="w-4 h-4 mr-2" /> Revoke Admin
+                                    </DropdownMenuItem>
+                                    <DropdownMenuSeparator />
+                                    <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteUser(admin.id)}>
+                                        <Trash2 className="w-4 h-4 mr-2" /> Remove User
+                                    </DropdownMenuItem>
+                                </DropdownMenuContent>
+                            </DropdownMenu>
+                        </div>
+                    ))}
+                </div>
             </div>
 
-            <div className="space-y-2">
-              <h4 className="text-sm font-medium text-muted-foreground">Current Admins</h4>
-               {admins.map(admin => (
-                 <div key={admin.id} className="flex justify-between items-center p-3 bg-card border border-border/50 rounded-lg">
-                   <div>
-                     <p className="font-medium">{admin.full_name}</p>
-                     <p className="text-xs text-muted-foreground">{admin.email}</p>
-                   </div>
-                   <div className="text-xs text-muted-foreground">
-                     Added {new Date(admin.created_at).toLocaleDateString()}
-                   </div>
-                 </div>
-               ))}
+            {/* RIGHT COL: Add New Admin / Search */}
+            <div className="bg-gradient-to-br from-card to-secondary/20 border border-border/50 rounded-xl p-6 space-y-6 shadow-sm">
+                 <div>
+                     <h3 className="font-semibold text-lg flex items-center gap-2">
+                        <UserCog className="w-5 h-5 text-emerald-500" /> User Management
+                    </h3>
+                    <p className="text-sm text-muted-foreground">Search to manage roles and privileges.</p>
+                </div>
+
+                <div className="space-y-4">
+                     <div className="relative">
+                         <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                             <Search className="h-4 w-4 text-muted-foreground" />
+                         </div>
+                         <Input 
+                            placeholder="Search by name or email..." 
+                            className="pl-9 bg-background/50"
+                            onChange={(e) => handleSearchUser(e.target.value)}
+                         />
+                     </div>
+                     
+                     {/* Search Results */}
+                     <div className="min-h-[200px] space-y-2">
+                         {isSearching ? (
+                             <div className="flex justify-center p-4"><Skeleton className="w-6 h-6 rounded-full animate-spin" /></div>
+                         ) : searchResults.length > 0 ? (
+                             searchResults.map(user => (
+                                 <div key={user.id} className="flex items-center justify-between p-3 bg-background/80 rounded-lg border hover:border-primary/50 transition-colors">
+                                     <div className="overflow-hidden">
+                                         <p className="font-medium text-sm truncate">{user.full_name}</p>
+                                         <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                                          <Badge variant="outline" className={`mt-1 text-[10px] h-5 ${
+                                              user.role === 'admin' ? 'border-indigo-500 text-indigo-600' :
+                                              user.role === 'teacher' ? 'border-emerald-500 text-emerald-600' : 'text-muted-foreground'
+                                          }`}>
+                                              {user.role}
+                                          </Badge>
+                                     </div>
+                                     
+                                     <Dialog>
+                                         <DialogTrigger asChild>
+                                             <Button 
+                                                size="sm" variant="outline"
+                                                onClick={() => setSelectedUser(user)}
+                                             >
+                                                Manage
+                                             </Button>
+                                         </DialogTrigger>
+                                         <DialogContent>
+                                             <DialogHeader>
+                                                 <DialogTitle>Manage User: {user.full_name}</DialogTitle>
+                                                 <DialogDescription>Assign a role or remove this user from the system.</DialogDescription>
+                                             </DialogHeader>
+                                             
+                                             <div className="grid gap-4 py-4">
+                                                 <div className="grid grid-cols-3 gap-2">
+                                                     <Button 
+                                                        variant={user.role === 'student' ? 'default' : 'outline'}
+                                                        className="w-full"
+                                                        onClick={() => handleUpdateRole(user.id, 'student')}
+                                                        disabled={actionLoading}
+                                                     >
+                                                         Student
+                                                     </Button>
+                                                     <Button 
+                                                        variant={user.role === 'teacher' ? 'default' : 'outline'}
+                                                        className="w-full"
+                                                        onClick={() => handleUpdateRole(user.id, 'teacher')}
+                                                        disabled={actionLoading}
+                                                     >
+                                                         Teacher
+                                                     </Button>
+                                                     <Button 
+                                                        variant={user.role === 'admin' ? 'default' : 'outline'}
+                                                        className="w-full ring-2 ring-indigo-500/20"
+                                                        onClick={() => handleUpdateRole(user.id, 'admin')}
+                                                        disabled={actionLoading}
+                                                     >
+                                                         Admin
+                                                     </Button>
+                                                 </div>
+                                                 
+                                                 <div className="border-t pt-4 mt-2">
+                                                     <Button 
+                                                        variant="destructive" 
+                                                        className="w-full"
+                                                        onClick={() => handleDeleteUser(user.id)}
+                                                        disabled={actionLoading}
+                                                     >
+                                                         <Trash2 className="w-4 h-4 mr-2" /> Delete User Account
+                                                     </Button>
+                                                 </div>
+                                             </div>
+                                         </DialogContent>
+                                     </Dialog>
+                                 </div>
+                             ))
+                         ) : (
+                             <div className="text-center py-8 text-muted-foreground text-sm border-2 border-dashed rounded-lg">
+                                 No users found
+                             </div>
+                         )}
+                     </div>
+                </div>
             </div>
 
           </div>

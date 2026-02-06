@@ -35,6 +35,7 @@ import { FloatingActionMenu } from '@/components/FloatingActionMenu';
 import AssignmentWizard from '@/components/AssignmentWizard';
 import { TeacherDashboardSkeleton } from '@/components/TeacherDashboardSkeleton';
 import { PwaInstallButton } from '@/components/PwaInstallButton';
+import ClassAssignmentsManager from '@/components/ClassAssignmentsManager';
 import { DashboardTabNavigation } from '@/components/DashboardTabNavigation';
 import NotesManager from '@/components/NotesManager';
 import TimetableManager from '@/components/TimetableManager';
@@ -310,16 +311,27 @@ export default function TeacherDashboard() {
     { id: 'events', label: 'Events', icon: CalendarDays, count: null },
     { id: 'notifications', label: 'Notifications', icon: Bell, count: unreadNotifCount > 0 ? unreadNotifCount : null },
     { id: 'profile', label: 'Profile', icon: User, count: null },
+    // Mobile Action Tabs (Will appear in "More" menu on mobile)
+    { id: 'action_add_assignment', label: 'Add Assignment', icon: Plus, count: null },
+    { id: 'action_add_note', label: 'Add Note', icon: FileText, count: null },
   ];
 
   const handleTabChange = (id: string) => {
-    console.log('Tab change requested:', id); // Debug logging
+    // Intercept Action Tabs
+    if (id === 'action_add_assignment') {
+      setShowAssignmentForm(true);
+      return;
+    }
+    if (id === 'action_add_note') {
+      setShowNoteForm(true);
+      return;
+    }
+
     if (id === 'home') {
-      setActiveTab('notes'); // Show notes/overview instead of redirecting
+      setActiveTab('notes'); 
     } else {
       setActiveTab(id as any);
     }
-    console.log('Active tab set to:', id === 'home' ? 'notes' : id); // Debug logging
   };
 
   const renderContent = () => {
@@ -391,109 +403,8 @@ export default function TeacherDashboard() {
 
       case 'assignments':
         return (
-          <div className="space-y-6">
-            {showAssignmentForm && (
-               <AssignmentWizard 
-                  userId={user?.id} 
-                  onClose={() => { setShowAssignmentForm(false); fetchContent(); }} 
-                  onSuccess={() => { setShowAssignmentForm(false); fetchContent(); }}
-               />
-            )}
-            {!showAssignmentForm && (
-              <>
-                {(showArchived ? archivedAssignments : activeAssignments).length === 0 ? (
-                  <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
-                    <Calendar className="w-16 h-16 text-gray-600 mx-auto mb-4" />
-                    <p className="text-gray-400 text-lg">No {showArchived ? 'archived' : 'active'} assignments</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {(showArchived ? archivedAssignments : activeAssignments).map((assignment, idx) => {
-                      const dueDate = new Date(assignment.due_date);
-                      const isOverdue = dueDate < new Date() && !assignment.is_completed;
-                      const daysUntilDue = Math.ceil((dueDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-                      return (
-                        <div
-                          key={assignment.id}
-                          className={`bg-white/5 backdrop-blur-xl rounded-2xl p-6 border transition-all animate-[fadeIn_0.3s_ease-out] ${
-                            assignment.is_completed
-                              ? 'border-green-500/30 bg-green-500/5'
-                              : isOverdue
-                              ? 'border-red-500/30 bg-red-500/5'
-                              : 'border-white/10 hover:border-indigo-500/50'
-                          }`}
-                          style={{ animationDelay: `${idx * 50}ms` }}
-                        >
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
-                            <button
-                              onClick={() => toggleAssignmentComplete(assignment.id, assignment.is_completed)}
-                              className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-all shrink-0 ${
-                                assignment.is_completed
-                                  ? 'bg-green-500 border-green-500 text-white'
-                                  : 'border-gray-500 hover:border-indigo-500'
-                              }`}
-                            >
-                              {assignment.is_completed && <CheckCircle2 className="w-5 h-5" />}
-                            </button>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-3 mb-2">
-                                <h3 className={`text-lg font-bold ${assignment.is_completed ? 'text-green-400 line-through' : 'text-white'}`}>
-                                  {assignment.title}
-                                </h3>
-                                {isOverdue && (
-                                  <span className="bg-red-500/20 text-red-400 text-xs font-bold px-2 py-1 rounded-full">OVERDUE</span>
-                                )}
-                                {assignment.is_completed && (
-                                  <span className="bg-green-500/20 text-green-400 text-xs font-bold px-2 py-1 rounded-full">COMPLETED</span>
-                                )}
-                              </div>
-                              <p className="text-gray-400 text-sm mb-3 line-clamp-2">{assignment.description}</p>
-                              <div className="flex flex-wrap items-center gap-4 text-sm">
-                                <span className={`font-medium ${isOverdue ? 'text-red-400' : 'text-indigo-400'}`}>
-                                  Due: {dueDate.toLocaleDateString()} {dueDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                </span>
-                                {!assignment.is_completed && !isOverdue && daysUntilDue <= 7 && (
-                                  <span className="text-amber-400">{daysUntilDue} days left</span>
-                                )}
-                                {assignment.github_repo_link && (
-                                  <a
-                                    href={assignment.github_repo_link}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="flex items-center gap-1 text-gray-400 hover:text-white transition-colors"
-                                  >
-                                    <ExternalLink className="w-4 h-4" />
-                                    GitHub
-                                  </a>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex gap-2 shrink-0">
-                              {!assignment.is_archived && (
-                                <button onClick={() => archiveAssignment(assignment.id)} className="p-2 text-amber-400 hover:bg-amber-500/20 rounded-lg transition-all">
-                                  <Archive className="w-5 h-5" />
-                                </button>
-                              )}
-                              <button
-                                onClick={async () => {
-                                  if (confirm('Delete this assignment permanently?')) {
-                                    await supabase.from('assignments').delete().eq('id', assignment.id);
-                                    fetchContent();
-                                  }
-                                }}
-                                className="p-2 text-red-400 hover:bg-red-500/20 rounded-lg transition-all"
-                              >
-                                <Trash2 className="w-5 h-5" />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </>
-            )}
+          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+             {user && <ClassAssignmentsManager userId={user.id} />}
           </div>
         );
 
@@ -979,11 +890,17 @@ export default function TeacherDashboard() {
         {renderContent()}
       </div>
 
-      {/* Floating Action Button for Mobile */}
-      <FloatingActionMenu 
-        onAddNote={() => { setActiveTab('notes'); setShowNoteForm(true); }}
-        onAddAssignment={() => { setActiveTab('assignments'); setShowAssignmentForm(true); }}
-      />
+      {/* Global Modals */}
+      {showAssignmentForm && user && (
+        <AssignmentWizard 
+          userId={user.id} 
+          onClose={() => setShowAssignmentForm(false)}
+          onSuccess={() => {
+            setShowAssignmentForm(false);
+            fetchContent();
+          }}
+        />
+      )}
       
       <div className="h-20 lg:hidden" />
 

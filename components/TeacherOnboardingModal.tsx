@@ -35,9 +35,10 @@ export default function TeacherOnboardingModal({
   teacherName,
   onComplete
 }: TeacherOnboardingModalProps) {
+  const [selectedCurricula, setSelectedCurricula] = useState<string[]>([]);
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [subjectClassPreferences, setSubjectClassPreferences] = useState<Record<string, string[]>>({});
-  const [currentStep, setCurrentStep] = useState(1);
+  const [currentStep, setCurrentStep] = useState(0); // Start at 0 for curriculum selection
   const [saving, setSaving] = useState(false);
 
   function toggleSubject(subject: string) {
@@ -121,14 +122,50 @@ export default function TeacherOnboardingModal({
           
           {/* Progress Steps */}
           <div className="flex items-center gap-2 mt-4">
-            <div className={`flex-1 h-2 rounded-full ${currentStep >= 1 ? 'bg-primary' : 'bg-muted'}`} />
-            <div className={`flex-1 h-2 rounded-full ${currentStep >= 2 ? 'bg-primary' : 'bg-muted'}`} />
+             <div className={`flex-1 h-2 rounded-full ${currentStep >= 0 ? 'bg-primary' : 'bg-muted'}`} />
+             <div className={`flex-1 h-2 rounded-full ${currentStep >= 1 ? 'bg-primary' : 'bg-muted'}`} />
+             <div className={`flex-1 h-2 rounded-full ${currentStep >= 2 ? 'bg-primary' : 'bg-muted'}`} />
           </div>
           <div className="flex justify-between mt-2 text-xs text-muted-foreground">
-            <span>Select Subjects</span>
-            <span>Class Preferences</span>
+            <span>Curriculum</span>
+            <span>Subjects</span>
+            <span>Classes</span>
           </div>
         </div>
+
+        {/* Step 0: Select Curriculum */}
+        {currentStep === 0 && (
+           <div className="space-y-6">
+              <div>
+                 <Label className="text-base">Which curriculum do you teach?</Label>
+                 <p className="text-sm text-muted-foreground mt-1">Select all that apply.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                 {['CBC', '8-4-4'].map(sys => (
+                    <div 
+                      key={sys}
+                      onClick={() => setSelectedCurricula(prev => prev.includes(sys) ? prev.filter(s => s !== sys) : [...prev, sys])}
+                      className={`p-6 border rounded-xl cursor-pointer transition-all text-center ${
+                          selectedCurricula.includes(sys) ? 'border-primary bg-primary/10 ring-2 ring-primary/20' : 'border-border/50 hover:bg-muted/50'
+                      }`}
+                    >
+                       <div className="font-bold text-lg mb-1">{sys}</div>
+                       <div className="text-xs text-muted-foreground">{sys === 'CBC' ? 'Junior School (Grades)' : 'High School (Forms)'}</div>
+                       <Checkbox checked={selectedCurricula.includes(sys)} className="mt-4" />
+                    </div>
+                 ))}
+              </div>
+              <div className="flex justify-end pt-4">
+                  <Button 
+                    onClick={() => setCurrentStep(1)} 
+                    disabled={selectedCurricula.length === 0}
+                    className="bg-primary"
+                  >
+                    Next: Select Subjects
+                  </Button>
+              </div>
+           </div>
+        )}
 
         {/* Step 1: Select Subjects */}
         {currentStep === 1 && (
@@ -190,7 +227,13 @@ export default function TeacherOnboardingModal({
                   </div>
                   
                   <div className="grid grid-cols-3 gap-2">
-                    {CLASS_LEVELS.map(classLevel => (
+                    {CLASS_LEVELS.filter(level => {
+                        const isCBC = level.startsWith('Grade');
+                        const is844 = level.startsWith('Form');
+                        if (isCBC && !selectedCurricula.includes('CBC')) return false;
+                        if (is844 && !selectedCurricula.includes('8-4-4')) return false;
+                        return true;
+                    }).map(classLevel => (
                       <div
                         key={classLevel}
                         onClick={() => toggleClassForSubject(subject, classLevel)}

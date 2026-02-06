@@ -33,6 +33,7 @@ interface Transcript {
   student_name: string;
   admission_number: string;
   class_name: string;
+  curriculum_type: 'CBC' | '8-4-4';
   total_score: number;
   average_score: number;
   overall_grade: string;
@@ -93,7 +94,7 @@ export default function StudentTranscriptViewer({
         .select(`
           *,
           exams!inner(exam_name, academic_year, term, start_date, end_date),
-          profiles!inner(full_name, admission_number, form_class)
+          profiles!inner(full_name, admission_number, form_class, curriculum_type)
         `)
         .eq("id", transcriptId)
         .eq("status", "Published")
@@ -121,6 +122,7 @@ export default function StudentTranscriptViewer({
         student_name: transcriptData.profiles.full_name,
         admission_number: transcriptData.profiles.admission_number,
         class_name: transcriptData.profiles.form_class,
+        curriculum_type: transcriptData.profiles.curriculum_type || '8-4-4',
         total_score: transcriptData.total_score,
         average_score: transcriptData.average_score,
         overall_grade: transcriptData.overall_grade,
@@ -266,30 +268,38 @@ export default function StudentTranscriptViewer({
                </div>
             </div>
 
-            {/* Summary Section - Always Visible */}
+            {/* Summary Section - Conditional for CBC */}
             <div className="bg-gradient-to-br from-primary/10 to-accent/5 border border-primary/20 rounded-xl p-5 shadow-sm">
-                <h3 className="text-sm font-bold text-primary uppercase tracking-wider mb-4 border-b border-primary/10 pb-2">mPerformance Summary</h3>
-                <div className="grid grid-cols-2 gap-4 text-center">
-                    <div className="bg-background/50 rounded-lg p-3">
-                        <p className="text-xs text-muted-foreground mb-1">Total Score</p>
-                        <p className="text-2xl font-black text-foreground">{transcript.total_score}</p>
-                    </div>
-                    <div className="bg-background/50 rounded-lg p-3">
-                        <p className="text-xs text-muted-foreground mb-1">Average</p>
-                        <p className="text-2xl font-black text-foreground">{transcript.average_score.toFixed(1)}%</p>
-                    </div>
+                <h3 className="text-sm font-bold text-primary uppercase tracking-wider mb-4 border-b border-primary/10 pb-2">Performance Summary</h3>
+                <div className={`grid ${transcript.curriculum_type === 'CBC' ? 'grid-cols-1' : 'grid-cols-2'} gap-4 text-center`}>
+                    {transcript.curriculum_type !== 'CBC' && (
+                      <>
+                        <div className="bg-background/50 rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1">Total Score</p>
+                            <p className="text-2xl font-black text-foreground">{transcript.total_score}</p>
+                        </div>
+                        <div className="bg-background/50 rounded-lg p-3">
+                            <p className="text-xs text-muted-foreground mb-1">Average</p>
+                            <p className="text-2xl font-black text-foreground">{transcript.average_score.toFixed(1)}%</p>
+                        </div>
+                      </>
+                    )}
                     <div className="bg-background/50 rounded-lg p-3 col-span-2 flex items-center justify-between px-6">
                         <div>
-                           <p className="text-xs text-muted-foreground mb-1">Grade</p>
+                           <p className="text-xs text-muted-foreground mb-1">{transcript.curriculum_type === 'CBC' ? 'Performance Level' : 'Grade'}</p>
                            <p className="text-2xl font-black text-primary">{transcript.overall_grade}</p>
                         </div>
-                        <div className="h-8 w-px bg-border/50" />
-                        <div>
-                           <p className="text-xs text-muted-foreground mb-1">Position</p>
-                           <p className="text-2xl font-black text-foreground flex items-center gap-2">
-                             <Trophy className="w-5 h-5 text-amber-500" /> {transcript.class_position}
-                           </p>
-                        </div>
+                        {transcript.curriculum_type !== 'CBC' && (
+                            <>
+                                <div className="h-8 w-px bg-border/50" />
+                                <div>
+                                    <p className="text-xs text-muted-foreground mb-1">Position</p>
+                                    <p className="text-2xl font-black text-foreground flex items-center gap-2">
+                                    <Trophy className="w-5 h-5 text-amber-500" /> {transcript.class_position}
+                                    </p>
+                                </div>
+                            </>
+                        )}
                     </div>
                 </div>
             </div>
@@ -300,7 +310,9 @@ export default function StudentTranscriptViewer({
                   onClick={() => setShowSubjects(!showSubjects)}
                   className="w-full flex items-center justify-between p-3 bg-card border border-border/50 rounded-lg shadow-sm active:scale-[0.99] transition-all"
                >
-                  <span className="font-semibold text-foreground">Subject Results ({transcript.items.length})</span>
+                  <span className="font-semibold text-foreground">
+                      {transcript.curriculum_type === 'CBC' ? "Learning Area Results" : "Subject Results"} ({transcript.items.length})
+                  </span>
                   {showSubjects ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
                </button>
 
@@ -318,10 +330,12 @@ export default function StudentTranscriptViewer({
                                {item.grade}
                              </div>
                           </div>
-                          <div className="flex items-center justify-between text-sm mb-2">
-                             <span className="text-muted-foreground">Score</span>
-                             <span className="font-mono font-semibold">{item.score} / {item.max_score}</span>
-                          </div>
+                          {transcript.curriculum_type !== 'CBC' && (
+                                <div className="flex items-center justify-between text-sm mb-2">
+                                    <span className="text-muted-foreground">Score</span>
+                                    <span className="font-mono font-semibold">{item.score} / {item.max_score}</span>
+                                </div>
+                           )}
                           {item.teacher_remarks && (
                              <div className="text-xs bg-muted/30 p-2 rounded mt-2">
                                <span className="font-semibold text-muted-foreground mr-1">Note:</span>
@@ -461,13 +475,17 @@ export default function StudentTranscriptViewer({
                    </div>
                    <div className="grid grid-cols-2 gap-4">
                        <div>
-                          <p className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">Term</p>
-                          <p className="font-semibold">{transcript.term}</p>
+                           <p className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">Term</p>
+                           <p className="font-semibold">{transcript.term}</p>
                        </div>
                        <div>
                            <p className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">Academic Year</p>
                            <p className="font-semibold">{transcript.academic_year}</p>
                        </div>
+                   </div>
+                   <div className="mt-2">
+                        <p className="text-[10px] uppercase tracking-widest opacity-60 mb-0.5">Curriculum</p>
+                        <p className="font-semibold">{transcript.curriculum_type}</p>
                    </div>
                 </div>
               </div>
@@ -477,9 +495,15 @@ export default function StudentTranscriptViewer({
                  <table className={`w-full border-collapse text-sm ${pdfSafeText}`}>
                    <thead>
                      <tr className={`border-b-[2px] ${pdfSafeBorder} text-left`}>
-                       <th className="py-2 font-bold uppercase tracking-wider text-[10px] w-1/2">Subject</th>
-                       <th className="py-2 text-center font-bold uppercase tracking-wider text-[10px]">Score</th>
-                       <th className="py-2 text-center font-bold uppercase tracking-wider text-[10px]">Grade</th>
+                       <th className="py-2 font-bold uppercase tracking-wider text-[10px] w-1/2">
+                           {transcript.curriculum_type === 'CBC' ? 'Learning Area' : 'Subject'}
+                       </th>
+                       {transcript.curriculum_type !== 'CBC' && (
+                           <th className="py-2 text-center font-bold uppercase tracking-wider text-[10px]">Score</th>
+                       )}
+                       <th className="py-2 text-center font-bold uppercase tracking-wider text-[10px]">
+                           {transcript.curriculum_type === 'CBC' ? 'Performance Level' : 'Grade'}
+                       </th>
                        <th className="py-2 text-right font-bold uppercase tracking-wider text-[10px] pl-4">Remarks</th>
                      </tr>
                    </thead>
@@ -487,7 +511,9 @@ export default function StudentTranscriptViewer({
                      {(transcript.items || []).map((item, index) => (
                        <tr key={index} className={index % 2 === 0 ? "bg-black/[0.02]" : "bg-transparent"}>
                          <td className="py-2 px-2 font-medium">{item.subject_name}</td>
-                         <td className="py-2 text-center font-mono">{item.score}</td>
+                         {transcript.curriculum_type !== 'CBC' && (
+                            <td className="py-2 text-center font-mono">{item.score}</td>
+                         )}
                          <td className="py-2 text-center font-bold">{item.grade}</td>
                          <td className="py-2 text-right pr-2 italic opacity-80 text-xs">{item.teacher_remarks}</td>
                        </tr>
@@ -499,24 +525,32 @@ export default function StudentTranscriptViewer({
               {/* SUMMARY METRICS */}
               <div className="flex justify-end mb-8">
                  <div className={`flex gap-6 border-y ${pdfSafeBorder} py-3 px-6 bg-black/5 rounded-lg ${pdfSafeText}`}>
+                     {transcript.curriculum_type !== 'CBC' && (
+                       <>
+                           <div className="text-center">
+                               <p className="text-[10px] uppercase tracking-widest opacity-60">Total Score</p>
+                               <p className="text-2xl font-black">{transcript.total_score}</p>
+                           </div>
+                           <div className={`text-center px-6 border-x ${pdfSafeBorder} border-opacity-20`}>
+                               <p className="text-[10px] uppercase tracking-widest opacity-60">Average</p>
+                               <p className="text-2xl font-black">{transcript.average_score.toFixed(1)}%</p>
+                           </div>
+                       </>
+                     )}
                      <div className="text-center">
-                        <p className="text-[10px] uppercase tracking-widest opacity-60">Total Score</p>
-                        <p className="text-2xl font-black">{transcript.total_score}</p>
-                     </div>
-                     <div className={`text-center px-6 border-x ${pdfSafeBorder} border-opacity-20`}>
-                        <p className="text-[10px] uppercase tracking-widest opacity-60">Average</p>
-                        <p className="text-2xl font-black">{transcript.average_score.toFixed(1)}%</p>
-                     </div>
-                     <div className="text-center">
-                        <p className="text-[10px] uppercase tracking-widest opacity-60">Overall Grade</p>
+                        <p className="text-[10px] uppercase tracking-widest opacity-60">
+                            {transcript.curriculum_type === 'CBC' ? 'Performance Level' : 'Overall Grade'}
+                        </p>
                         <p className="text-2xl font-black text-gray-800">{transcript.overall_grade}</p>
                      </div>
-                     <div className={`text-center pl-6 border-l ${pdfSafeBorder} border-opacity-20`}>
-                        <p className="text-[10px] uppercase tracking-widest opacity-60">Position</p>
-                        <p className="text-2xl font-black flex items-center justify-center gap-1">
-                          <Trophy className="w-4 h-4 text-amber-600" /> {transcript.class_position}
-                        </p>
-                     </div>
+                     {transcript.curriculum_type !== 'CBC' && (
+                       <div className={`text-center pl-6 border-l ${pdfSafeBorder} border-opacity-20`}>
+                            <p className="text-[10px] uppercase tracking-widest opacity-60">Position</p>
+                            <p className="text-2xl font-black flex items-center justify-center gap-1">
+                              <Trophy className="w-4 h-4 text-amber-600" /> {transcript.class_position}
+                            </p>
+                       </div>
+                     )}
                  </div>
               </div>
               

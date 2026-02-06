@@ -4,9 +4,11 @@ import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { 
   X, Check, ChevronRight, ChevronLeft, Upload, FileText, 
-  Calendar, Settings, Users, BookOpen, Clock, AlertCircle, Loader2
+  Calendar, Settings, Users, BookOpen, Clock, AlertCircle, 
+  Loader2, Wifi, WifiOff, List
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import QuestionBuilder, { Question } from '@/components/QuestionBuilder';
 
 // Initialize Supabase Client
 const supabase = createClient(
@@ -27,64 +29,67 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
   
   // Data State
   const [title, setTitle] = useState('');
-  const [className, setClassName] = useState('');
-  const [subject, setSubject] = useState('');
+  const [selectedCurriculum, setSelectedCurriculum] = useState(''); // 'CBC' or '8-4-4'
+  const [selectedClassId, setSelectedClassId] = useState('');
+  const [selectedSubjectId, setSelectedSubjectId] = useState('');
+  const [type, setType] = useState<'ONLINE_AUTO_GRADED' | 'OFFLINE_DOCUMENT_BASED'>('OFFLINE_DOCUMENT_BASED');
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('23:59');
-  const [marks, setMarks] = useState(100);
-  const [instructions, setInstructions] = useState('');
-  
-  // Settings
-  const [submissionType, setSubmissionType] = useState<'text' | 'file' | 'both'>('both');
+  const [totalMarks, setTotalMarks] = useState(100);
+  const [description, setDescription] = useState('');
   const [allowLate, setAllowLate] = useState(true);
-  const [isPublished, setIsPublished] = useState(false);
+  const [status, setStatus] = useState<'DRAFT' | 'PUBLISHED'>('DRAFT');
 
-  // Attachment
+  // Offline Specific
   const [attachment, setAttachment] = useState<File | null>(null);
-  // Data Lists
-  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
-  const [classSubjectsMap, setClassSubjectsMap] = useState<Record<string, string[]>>({});
+  
+  // Online Specific
+  const [questions, setQuestions] = useState<Question[]>([]);
 
-  // Fetch classes and subjects on mount
-  // Fetch classes and subjects on mount
+  // Metadata Lists
+  const [classes, setClasses] = useState<{id: string, name: string, form_level: string, subjects: string[]}[]>([]);
+  const [subjects, setSubjects] = useState<{id: string, name: string}[]>([]); // Resolved subject objects
+
+  // Fetch classes and resolve subject names to IDs
   useEffect(() => {
     async function fetchData() {
       try {
-        // Fetch All Teacher Classes with their assigned subjects
+        // 1. Fetch Teacher Classes
         const { data: teacherClasses } = await supabase
           .from('teacher_classes')
           .select(`
+            class_id,
             subjects,
-            classes!inner (
-              name, 
-              form_level
-            )
+            classes!inner (id, name, form_level)
           `)
           .eq('teacher_id', userId);
 
-        if (teacherClasses) {
-          const clsSubMap: Record<string, string[]> = {};
-          
-          teacherClasses.forEach((tc: any) => {
-            const className = `${tc.classes.name} (${tc.classes.form_level})`;
-            // Start with existing subjects for this class or empty array
-            const currentSubjects = clsSubMap[className] || [];
-            
-            // Add new subjects if they exist
-            if (Array.isArray(tc.subjects)) {
-              // tc.subjects is array of strings (names) as per schema/usage
-              tc.subjects.forEach((s: string) => {
-                if (!currentSubjects.includes(s)) {
-                  currentSubjects.push(s);
-                }
-              });
-            }
-            clsSubMap[className] = currentSubjects;
-          });
+        if (!teacherClasses) return;
 
-          setClassSubjectsMap(clsSubMap);
-          setAvailableClasses(Object.keys(clsSubMap));
+        // Process Classes
+        const processedClasses = teacherClasses.map((tc: any) => ({
+          id: tc.class_id,
+          name: tc.classes.name,
+          form_level: tc.classes.form_level,
+          subjects: tc.subjects || []
+        }));
+        setClasses(processedClasses);
+
+        // 2. Fetch All Subjects to Map Names -> IDs
+        // We get all distinct subject names from the teacher's classes to minimize query
+        const allSubjectNames = Array.from(new Set(processedClasses.flatMap(c => c.subjects)));
+        
+        if (allSubjectNames.length > 0) {
+            const { data: subjectData } = await supabase
+            .from('subjects')
+            .select('id, name')
+            .in('name', allSubjectNames);
+            
+            if (subjectData) {
+                setSubjects(subjectData);
+            }
         }
+
       } catch (err) {
         console.error('Error fetching wizard data:', err);
       }
@@ -93,14 +98,38 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
     fetchData();
   }, [userId]);
 
+  // Derived: Filter Classes based on selected Curriculum
+  const filteredClasses = React.useMemo(() => {
+    if (!selectedCurriculum) return [];
+    return classes.filter(c => {
+        if (selectedCurriculum === 'CBC') return c.name.startsWith('Grade') || c.name.startsWith('PP');
+        // Relaxed 8-4-4 logic: Show everything that is NOT CBC (Grade/PP)
+        if (selectedCurriculum === '8-4-4') return !c.name.startsWith('Grade') && !c.name.startsWith('PP');
+        return true;
+    });
+  }, [classes, selectedCurriculum]);
+
+  // Derived: Available Subjects for Selected Class
+  const availableSubjects = React.useMemo(() => {
+    if (!selectedClassId) return [];
+    const cls = classes.find(c => c.id === selectedClassId);
+    if (!cls) return [];
+    // Filter the resolved subjects list to only include ones taught in this class
+    return subjects.filter(s => cls.subjects.includes(s.name));
+  }, [selectedClassId, classes, subjects]);
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
       setAttachment(e.target.files[0]);
     }
   };
 
+  const calculateOnlineTotalMarks = () => {
+     return questions.reduce((sum, q) => sum + (q.marks || 0), 0);
+  };
+
   const handleSubmit = async () => {
-    if (!title || !className || !subject || !dueDate) {
+    if (!title || !selectedClassId || !selectedSubjectId || !dueDate) {
       setError('Please fill in all required fields in Step 1');
       return;
     }
@@ -111,44 +140,70 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
     try {
       let attachmentUrl = null;
 
-      // 1. Upload File (if any)
-      if (attachment) {
+      // 1. Upload File (if Offline mode and file exists)
+      if (type === 'OFFLINE_DOCUMENT_BASED' && attachment) {
         const fileExt = attachment.name.split('.').pop();
-        const fileName = `${Math.random().toString(36).substring(2)}.${fileExt}`;
-        const filePath = `${userId}/${fileName}`;
-
+        const fileName = `${userId}/${Math.random().toString(36).substring(2)}.${fileExt}`;
+        
         const { error: uploadError } = await supabase.storage
           .from('assignment-attachments')
-          .upload(filePath, attachment);
+          .upload(fileName, attachment); // Note: bucket name might vary, check buckets if fails
 
         if (uploadError) throw uploadError;
 
         const { data: { publicUrl } } = supabase.storage
           .from('assignment-attachments')
-          .getPublicUrl(filePath);
+          .getPublicUrl(fileName);
         
         attachmentUrl = publicUrl;
       }
 
       // 2. Insert Assignment
-      const { error: insertError } = await supabase.from('assignments').insert({
-        title,
-        class_name: className, // Using text column for now as verified in schema plan
-        subject,
-        description: instructions,
-        due_date: `${dueDate}T${dueTime}:00`,
-        max_marks: marks,
-        submission_type: submissionType,
-        allow_late_submissions: allowLate,
-        is_published: isPublished,
-        user_id: userId,
-        attachment_urls: attachmentUrl ? [attachmentUrl] : [],
-      });
+      const finalMarks = type === 'ONLINE_AUTO_GRADED' ? calculateOnlineTotalMarks() : totalMarks;
+
+      const { data: assignmentData, error: insertError } = await supabase
+        .from('assignments')
+        .insert({
+            title,
+            teacher_id: userId,
+            class_id: selectedClassId,
+            subject_id: selectedSubjectId,
+            type, 
+            description,
+            due_date: `${dueDate}T${dueTime}:00`,
+            total_marks: finalMarks,
+            allow_late_submission: allowLate,
+            status, // DRAFT or PUBLISHED
+            attachment_url: attachmentUrl
+        })
+        .select()
+        .single();
 
       if (insertError) throw insertError;
+      const assignmentId = assignmentData.id;
+
+      // 3. Insert Questions (if Online)
+      if (type === 'ONLINE_AUTO_GRADED' && questions.length > 0) {
+          const formattedQuestions = questions.map((q, idx) => ({
+              assignment_id: assignmentId,
+              question_text: q.question_text,
+              question_type: q.question_type,
+              marks: q.marks,
+              order_index: idx,
+              correct_answer: q.correct_answer,
+              options: q.options ? JSON.stringify(q.options) : null
+          }));
+
+          const { error: qError } = await supabase
+            .from('assignment_questions')
+            .insert(formattedQuestions);
+            
+          if (qError) throw qError;
+      }
 
       if (onSuccess) onSuccess();
       onClose();
+
     } catch (err: any) {
       console.error('Error creating assignment:', err);
       setError(err.message || 'Failed to create assignment');
@@ -159,7 +214,7 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in">
-      <div className="bg-slate-900 border border-slate-700 w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
+      <div className="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] overflow-hidden">
         
         {/* Header */}
         <div className="p-4 border-b border-slate-700 flex items-center justify-between bg-slate-800/50">
@@ -189,187 +244,276 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
             </div>
           )}
 
+          {/* STEP 1: BASICS */}
           {step === 1 && (
             <div className="space-y-6 animate-in slide-in-from-right-4 fade-in duration-300">
-              <div className="space-y-4">
-                <label className="block">
-                  <span className="text-slate-300 font-medium mb-1.5 block">Assignment Title</span>
-                  <input 
-                    type="text" 
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. Calculus Mid-Term Project"
-                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                  />
-                </label>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <label className="block">
-                    <span className="text-slate-300 font-medium mb-1.5 block">Subject</span>
-                    <select 
-                      value={subject}
-                      onChange={(e) => setSubject(e.target.value)}
-                      disabled={!className}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none disabled:opacity-50"
-                    >
-                      <option value="">Select Subject</option>
-                      {className && classSubjectsMap[className]?.map(subj => (
-                        <option key={subj} value={subj}>{subj}</option>
-                      ))}
-                    </select>
-                  </label>
-
-                  <label className="block">
-                    <span className="text-slate-300 font-medium mb-1.5 block">Class</span>
-                    <select 
-                      value={className}
-                      onChange={(e) => setClassName(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"
-                    >
-                      <option value="">Select Class</option>
-                      {availableClasses.map(c => (
-                        <option key={c} value={c}>{c}</option>
-                      ))}
-                    </select>
-                  </label>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                
+                {/* Type Selection Cards */}
+                <div 
+                    onClick={() => setType('OFFLINE_DOCUMENT_BASED')}
+                    className={cn(
+                        "cursor-pointer p-4 rounded-xl border transition-all flex flex-col gap-2",
+                        type === 'OFFLINE_DOCUMENT_BASED' 
+                            ? "bg-indigo-500/10 border-indigo-500" 
+                            : "bg-slate-800 border-slate-700 hover:border-slate-600"
+                    )}
+                >
+                    <div className="flex items-center gap-3 mb-1">
+                        <div className="p-2 bg-indigo-500/20 rounded-lg text-indigo-400">
+                            <WifiOff className="w-5 h-5" />
+                        </div>
+                        <h3 className="font-semibold text-white">Offline / Document</h3>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                        Students upload a file or write a response. Manual grading required.
+                    </p>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <label className="block">
-                    <span className="text-slate-300 font-medium mb-1.5 block">Due Date</span>
-                    <input 
-                      type="date" 
-                      value={dueDate}
-                      onChange={(e) => setDueDate(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="text-slate-300 font-medium mb-1.5 block">Due Time</span>
-                    <input 
-                      type="time" 
-                      value={dueTime}
-                      onChange={(e) => setDueTime(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
-                    />
-                  </label>
+                <div 
+                    onClick={() => setType('ONLINE_AUTO_GRADED')}
+                    className={cn(
+                        "cursor-pointer p-4 rounded-xl border transition-all flex flex-col gap-2",
+                        type === 'ONLINE_AUTO_GRADED' 
+                            ? "bg-emerald-500/10 border-emerald-500" 
+                            : "bg-slate-800 border-slate-700 hover:border-slate-600"
+                    )}
+                >
+                    <div className="flex items-center gap-3 mb-1">
+                         <div className="p-2 bg-emerald-500/20 rounded-lg text-emerald-400">
+                            <Wifi className="w-5 h-5" />
+                        </div>
+                        <h3 className="font-semibold text-white">Online Auto-Graded</h3>
+                    </div>
+                    <p className="text-xs text-slate-400 leading-relaxed">
+                        Create quizzes with MCQs, Short Answers. Automatic grading support.
+                    </p>
                 </div>
+              </div>
+
+               <div className="space-y-4 pt-4 border-t border-slate-700/50">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <label className="block">
+                          <span className="text-slate-300 font-medium mb-1.5 block">Assignment Title</span>
+                          <input 
+                            type="text" 
+                            value={title}
+                            onChange={(e) => setTitle(e.target.value)}
+                            placeholder="e.g. History Final Project"
+                            className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                          />
+                      </label>
+
+                       <label className="block">
+                        <span className="text-slate-300 font-medium mb-1.5 block">Curriculum</span>
+                        <select 
+                          value={selectedCurriculum}
+                          onChange={(e) => {
+                              setSelectedCurriculum(e.target.value);
+                              setSelectedClassId(''); // Reset dependency
+                              setSelectedSubjectId('');
+                          }}
+                          className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"
+                        >
+                          <option value="">Select Curriculum</option>
+                          <option value="CBC">CBC (Grade 1-6)</option>
+                          <option value="8-4-4">8-4-4 (Form 1-4)</option>
+                        </select>
+                      </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                     <label className="block">
+                      <span className="text-slate-300 font-medium mb-1.5 block">Class</span>
+                      <select 
+                        value={selectedClassId}
+                        onChange={(e) => {
+                            setSelectedClassId(e.target.value);
+                            setSelectedSubjectId(''); // Reset subject when class changes
+                        }}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"
+                        disabled={!selectedCurriculum}
+                      >
+                        <option value="">Select Class</option>
+                        {filteredClasses.map(c => (
+                          <option key={c.id} value={c.id}>{c.name} ({c.form_level})</option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="block">
+                      <span className="text-slate-300 font-medium mb-1.5 block">Subject</span>
+                      <select 
+                        value={selectedSubjectId}
+                        onChange={(e) => setSelectedSubjectId(e.target.value)}
+                        disabled={!selectedClassId}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none disabled:opacity-50"
+                      >
+                        <option value="">Select Subject</option>
+                        {availableSubjects.map(s => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <label className="block">
+                      <span className="text-slate-300 font-medium mb-1.5 block">Due Date</span>
+                      <input 
+                        type="date" 
+                        value={dueDate}
+                        onChange={(e) => setDueDate(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                      />
+                    </label>
+                    <label className="block">
+                      <span className="text-slate-300 font-medium mb-1.5 block">Due Time</span>
+                      <input 
+                        type="time" 
+                        value={dueTime}
+                        onChange={(e) => setDueTime(e.target.value)}
+                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+                      />
+                    </label>
+                  </div>
               </div>
             </div>
           )}
 
+          {/* STEP 2: CONTENT */}
           {step === 2 && (
             <div className="space-y-6 animate-in slide-in-from-right-4 fade-in duration-300">
-              <label className="block">
-                <span className="text-slate-300 font-medium mb-1.5 block">Instructions</span>
-                <textarea 
-                  value={instructions}
-                  onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="Detailed instructions for the students..."
-                  rows={6}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
-                />
-              </label>
+               <label className="block">
+                    <span className="text-slate-300 font-medium mb-1.5 block">Instructions / Description</span>
+                    <textarea 
+                      value={description}
+                      onChange={(e) => setDescription(e.target.value)}
+                      placeholder="Provide detailed instructions for your students..."
+                      rows={4}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all resize-none"
+                    />
+               </label>
 
-              <div>
-                <span className="text-slate-300 font-medium mb-1.5 block">Attach File (Optional)</span>
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-700 rounded-xl hover:border-indigo-500 hover:bg-slate-800/50 transition-all cursor-pointer group">
-                  <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                    <Upload className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 mb-2 transition-colors" />
-                    <p className="text-sm text-slate-400 group-hover:text-slate-300">
-                      {attachment ? attachment.name : 'Click to upload or drag and drop'}
-                    </p>
-                    <p className="text-xs text-slate-500 mt-1">PDF, DOCX, ZIP up to 10MB</p>
+               {/* OFFLINE MODE CONTENT */}
+               {type === 'OFFLINE_DOCUMENT_BASED' && (
+                  <div className="space-y-6">
+                      <div>
+                        <span className="text-slate-300 font-medium mb-1.5 block">Attach Resource (Optional)</span>
+                        <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-slate-700 rounded-xl hover:border-indigo-500 hover:bg-slate-800/50 transition-all cursor-pointer group">
+                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
+                            <Upload className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 mb-2 transition-colors" />
+                            <p className="text-sm text-slate-400 group-hover:text-slate-300">
+                              {attachment ? attachment.name : 'Click to upload'}
+                            </p>
+                            <p className="text-xs text-slate-500 mt-1">PDF, DOCX, IMG</p>
+                          </div>
+                          <input type="file" className="hidden" onChange={handleFileUpload} />
+                        </label>
+                      </div>
+
+                       <div className="flex items-center justify-between">
+                          <span className="text-slate-300">Total Marks</span>
+                          <input 
+                            type="number" 
+                            value={totalMarks} 
+                            onChange={(e) => setTotalMarks(Number(e.target.value))}
+                            className="w-24 bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 text-right font-mono"
+                          />
+                        </div>
                   </div>
-                  <input type="file" className="hidden" onChange={handleFileUpload} />
-                </label>
-              </div>
+               )}
+
+               {/* ONLINE MODE CONTENT */}
+               {type === 'ONLINE_AUTO_GRADED' && (
+                   <div className="space-y-4">
+                       <div className="flex items-center justify-between border-b border-slate-700 pb-2">
+                           <h3 className="text-lg font-bold text-white">Question Builder</h3>
+                           <div className="text-sm text-slate-400">
+                               Total Marks: <span className="text-emerald-400 font-mono font-bold">{calculateOnlineTotalMarks()}</span>
+                           </div>
+                       </div>
+                       <QuestionBuilder questions={questions} onChange={setQuestions} />
+                   </div>
+               )}
             </div>
           )}
 
+          {/* STEP 3: REVIEW */}
           {step === 3 && (
             <div className="space-y-6 animate-in slide-in-from-right-4 fade-in duration-300">
-              <div className="space-y-4">
-                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                  <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-                    <Settings className="w-4 h-4 text-indigo-400" />
-                    Configuration
-                  </h3>
-                  
-                  <div className="space-y-4">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-300">Submission Type</span>
-                      <select 
-                        value={submissionType} 
-                        onChange={(e: any) => setSubmissionType(e.target.value)}
-                        className="bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                      >
-                        <option value="text">Text Only</option>
-                        <option value="file">File Upload</option>
-                        <option value="both">Both</option>
-                      </select>
+                <div className="grid gap-6 md:grid-cols-2">
+                    <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700 space-y-3">
+                        <h3 className="text-white font-semibold flex items-center gap-2">
+                            <BookOpen className="w-4 h-4 text-indigo-400" />
+                            Details
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Title:</span>
+                                <span className="text-slate-200">{title}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Class:</span>
+                                <span className="text-slate-200">{classes.find(c => c.id === selectedClassId)?.name}</span>
+                            </div>
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Subject:</span>
+                                <span className="text-slate-200">{subjects.find(s => s.id === selectedSubjectId)?.name}</span>
+                            </div>
+                             <div className="flex justify-between">
+                                <span className="text-slate-400">Due:</span>
+                                <span className="text-slate-200">{dueDate} @ {dueTime}</span>
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-300">Max Marks</span>
-                      <input 
-                        type="number" 
-                        value={marks} 
-                        onChange={(e) => setMarks(Number(e.target.value))}
-                        className="w-20 bg-slate-900 border border-slate-700 text-white text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500 text-right"
-                      />
+                    <div className="bg-slate-800/50 rounded-xl p-5 border border-slate-700 space-y-3">
+                        <h3 className="text-white font-semibold flex items-center gap-2">
+                            <Settings className="w-4 h-4 text-emerald-400" />
+                            Settings
+                        </h3>
+                        <div className="space-y-2 text-sm">
+                            <div className="flex justify-between">
+                                <span className="text-slate-400">Type:</span>
+                                <span className="text-slate-200">
+                                    {type === 'ONLINE_AUTO_GRADED' ? 'Online Quiz' : 'Document'}
+                                </span>
+                            </div>
+                             <div className="flex justify-between">
+                                <span className="text-slate-400">Grading:</span>
+                                <span className="text-slate-200">
+                                    {type === 'ONLINE_AUTO_GRADED' ? 'Auto-Graded' : 'Manual'}
+                                </span>
+                            </div>
+                             <div className="flex justify-between">
+                                <span className="text-slate-400">Total Marks:</span>
+                                <span className="text-slate-200 font-mono">
+                                     {type === 'ONLINE_AUTO_GRADED' ? calculateOnlineTotalMarks() : totalMarks}
+                                </span>
+                            </div>
+                        </div>
                     </div>
-
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-300">Allow Late Submissions</span>
-                      <button 
-                        onClick={() => setAllowLate(!allowLate)}
-                        className={cn(
-                          "w-12 h-6 rounded-full transition-colors relative",
-                          allowLate ? "bg-green-500" : "bg-slate-700"
-                        )}
-                      >
-                        <div className={cn(
-                          "w-4 h-4 bg-white rounded-full absolute top-1 transition-all",
-                          allowLate ? "left-7" : "left-1"
-                        )} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
-                  <h3 className="text-white font-semibold mb-4 flex items-center gap-2">
-                    <BookOpen className="w-4 h-4 text-emerald-400" />
-                    Review
-                  </h3>
-                   <div className="space-y-2 text-sm text-slate-400">
-                    <p><strong className="text-slate-300">Title:</strong> {title || 'Untitled'}</p>
-                    <p><strong className="text-slate-300">Class:</strong> {className || 'None'}</p>
-                    <p><strong className="text-slate-300">Due:</strong> {dueDate} at {dueTime}</p>
-                    <p><strong className="text-slate-300">Attachment:</strong> {attachment ? attachment.name : 'None'}</p>
-                  </div>
                 </div>
 
                 <div className="flex items-center gap-3 p-4 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
                   <div className="flex-1">
-                    <h4 className="text-white font-medium">Publish Now?</h4>
-                    <p className="text-indigo-200 text-xs">Students will be notified immediately.</p>
+                    <h4 className="text-white font-medium">Publish Immediately?</h4>
+                    <p className="text-indigo-200 text-xs">If disabled, assignment will be saved as a DRAFT.</p>
                   </div>
                   <button 
-                    onClick={() => setIsPublished(!isPublished)}
+                    onClick={() => setStatus(status === 'PUBLISHED' ? 'DRAFT' : 'PUBLISHED')}
                     className={cn(
                       "w-12 h-6 rounded-full transition-colors relative",
-                      isPublished ? "bg-indigo-500" : "bg-slate-700"
+                      status === 'PUBLISHED' ? "bg-indigo-500" : "bg-slate-700"
                     )}
                   >
                     <div className={cn(
                       "w-4 h-4 bg-white rounded-full absolute top-1 transition-all",
-                      isPublished ? "left-7" : "left-1"
+                      status === 'PUBLISHED' ? "left-7" : "left-1"
                     )} />
                   </button>
                 </div>
-              </div>
             </div>
           )}
 
@@ -392,7 +536,7 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
           {step < 3 ? (
             <button 
               onClick={() => {
-                if (step === 1 && (!title || !className || !subject || !dueDate)) {
+                if (step === 1 && (!title || !selectedCurriculum || !selectedClassId || !selectedSubjectId || !dueDate)) {
                   setError('Please fill in required fields');
                   return;
                 }
@@ -411,7 +555,7 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
               className="px-6 py-2 bg-gradient-to-r from-emerald-500 to-green-600 hover:from-emerald-600 hover:to-green-700 text-white rounded-lg transition-all flex items-center gap-2 font-bold shadow-lg shadow-emerald-500/20 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-              {isPublished ? 'Publish Assignment' : 'Save as Draft'}
+              {status === 'PUBLISHED' ? 'Publish Assignment' : 'Save Draft'}
             </button>
           )}
         </div>
