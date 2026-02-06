@@ -136,20 +136,32 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
   async function fetchAssignedSubjects() {
     if (!selectedClass) return;
 
-    const { data } = await supabase
-      .from("teacher_classes")
-      .select("subjects")
-      .eq("teacher_id", teacherId)
-      .eq("class_id", selectedClass)
-      .single();
+    try {
+      const { data } = await supabase
+        .from("teacher_classes")
+        .select("subjects")
+        .eq("teacher_id", teacherId)
+        .eq("class_id", selectedClass)
+        .single();
 
-    if (data && data.subjects) {
-      const { data: subjectsData } = await supabase
-        .from("subjects")
-        .select("id, name")
-        .in("id", data.subjects);
+        if (data && data.subjects && Array.isArray(data.subjects)) {
+        // data.subjects is array of names (strings)
+        const { data: subjectsData, error } = await supabase
+          .from("subjects")
+          .select("id, name")
+          .in("name", data.subjects);
 
-      if (subjectsData) setAssignedSubjects(subjectsData);
+        if (error) {
+          console.error("Error fetching subject details:", error);
+          return;
+        }
+
+        if (subjectsData) {
+          setAssignedSubjects(subjectsData);
+        }
+      }
+    } catch (error) {
+      console.error("Error in fetchAssignedSubjects:", error);
     }
   }
 

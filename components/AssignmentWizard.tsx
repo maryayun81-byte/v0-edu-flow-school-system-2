@@ -41,15 +41,57 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
 
   // Attachment
   const [attachment, setAttachment] = useState<File | null>(null);
-  const [classes, setClasses] = useState<any[]>([]);
+  // Data Lists
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+  const [classSubjectsMap, setClassSubjectsMap] = useState<Record<string, string[]>>({});
 
-  // Fetch classes on mount
+  // Fetch classes and subjects on mount
+  // Fetch classes and subjects on mount
   useEffect(() => {
-    // Fetch distinct classes/subjects? For now, we'll hardcode or simplistic fetch.
-    // In a real app we'd fetch from teacher_classes.
-    // Simulating:
-    setClasses(['Form 1 A', 'Form 2 B', 'Form 3 C', 'Form 4 East']);
-  }, []);
+    async function fetchData() {
+      try {
+        // Fetch All Teacher Classes with their assigned subjects
+        const { data: teacherClasses } = await supabase
+          .from('teacher_classes')
+          .select(`
+            subjects,
+            classes!inner (
+              name, 
+              form_level
+            )
+          `)
+          .eq('teacher_id', userId);
+
+        if (teacherClasses) {
+          const clsSubMap: Record<string, string[]> = {};
+          
+          teacherClasses.forEach((tc: any) => {
+            const className = `${tc.classes.name} (${tc.classes.form_level})`;
+            // Start with existing subjects for this class or empty array
+            const currentSubjects = clsSubMap[className] || [];
+            
+            // Add new subjects if they exist
+            if (Array.isArray(tc.subjects)) {
+              // tc.subjects is array of strings (names) as per schema/usage
+              tc.subjects.forEach((s: string) => {
+                if (!currentSubjects.includes(s)) {
+                  currentSubjects.push(s);
+                }
+              });
+            }
+            clsSubMap[className] = currentSubjects;
+          });
+
+          setClassSubjectsMap(clsSubMap);
+          setAvailableClasses(Object.keys(clsSubMap));
+        }
+      } catch (err) {
+        console.error('Error fetching wizard data:', err);
+      }
+    }
+    
+    fetchData();
+  }, [userId]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files?.[0]) {
@@ -167,17 +209,13 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
                     <select 
                       value={subject}
                       onChange={(e) => setSubject(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"
+                      disabled={!className}
+                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none disabled:opacity-50"
                     >
                       <option value="">Select Subject</option>
-                      <option value="Mathematics">Mathematics</option>
-                      <option value="English">English</option>
-                      <option value="Physics">Physics</option>
-                      <option value="Chemistry">Chemistry</option>
-                      <option value="Biology">Biology</option>
-                      <option value="History">History</option>
-                      <option value="Geography">Geography</option>
-                      <option value="Computer Studies">Computer Studies</option>
+                      {className && classSubjectsMap[className]?.map(subj => (
+                        <option key={subj} value={subj}>{subj}</option>
+                      ))}
                     </select>
                   </label>
 
@@ -189,7 +227,7 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
                       className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-all appearance-none"
                     >
                       <option value="">Select Class</option>
-                      {classes.map(c => (
+                      {availableClasses.map(c => (
                         <option key={c} value={c}>{c}</option>
                       ))}
                     </select>

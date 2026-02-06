@@ -135,11 +135,17 @@ export default function TeacherDashboard() {
       const { data } = await supabase
         .from('notifications')
         .select('*')
+        // Safety filter: ensure we only get notifications for teachers or this specific user
+        // (RLS handles this securely, but this adds clarity to the intention)
+        .or(`target_role.eq.teacher,target_user_id.eq.${user.id}`)
         .order('created_at', { ascending: false })
         .limit(50);
+
       if (data) {
-        setAllNotifications(data);
-        setUnreadNotifCount(data.filter(n => !n.is_read).length);
+        // Double check client side to filter out any stray student notifs if RLS was delayed
+        const validNotifs = data.filter(n => n.target_role !== 'student');
+        setAllNotifications(validNotifs);
+        setUnreadNotifCount(validNotifs.filter((n: any) => !n.is_read).length);
       }
     } catch (error) {
       console.error('Error fetching notifications:', error);
@@ -681,7 +687,7 @@ export default function TeacherDashboard() {
                 />
               </div>
             ) : (
-              <div className="text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
+              <div className="relative z-10 text-center py-16 bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10">
                 <Trophy className="w-16 h-16 text-amber-500 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-white mb-2">Exam Marks Entry</h3>
                 <p className="text-gray-400 mb-6">Enter and manage student marks for closed exams</p>

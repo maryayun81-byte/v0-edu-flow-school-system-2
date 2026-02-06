@@ -25,6 +25,7 @@ import {
   DollarSign,
   FileText,
   Trophy,
+  Settings,
 } from "lucide-react";
 import EventManager from "@/components/EventManager";
 import TuitionManager from "@/components/TuitionManager";
@@ -32,6 +33,7 @@ import NotificationCreator from "@/components/admin/NotificationCreator";
 import AdminTimetableTab from "@/components/admin/AdminTimetableTab";
 import AdminExamManager from "@/components/admin/AdminExamManager";
 import AdminTranscriptManager from "@/components/admin/AdminTranscriptManager";
+import AdminSettingsTab from "@/components/admin/AdminSettingsTab";
 import { DashboardTabNavigation } from "@/components/DashboardTabNavigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -58,6 +60,11 @@ interface Teacher {
   email: string;
   subject?: string;
   created_at: string;
+  preferences?: {
+    teacher_id: string;
+    subject: string;
+    preferred_classes: string[];
+  }[];
 }
 
 interface Class {
@@ -102,7 +109,7 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings">("overview");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -563,6 +570,7 @@ export default function AdminDashboard() {
             { id: "notifications", label: "Notifications", icon: Bell },
             { id: "finance", label: "Finance", icon: DollarSign },
             { id: "messages", label: "Messages", icon: MessageSquare },
+            { id: "settings", label: "Settings", icon: Settings },
           ]}
           activeTab={activeTab}
           onTabChange={(tab) => setActiveTab(tab as typeof activeTab)}
@@ -917,6 +925,11 @@ export default function AdminDashboard() {
         {/* Transcripts Tab */}
         {activeTab === "transcripts" && (
           <AdminTranscriptManager />
+        )}
+
+        {/* Settings Tab */}
+        {activeTab === "settings" && (
+          <AdminSettingsTab />
         )}
       </div>
     </div>
