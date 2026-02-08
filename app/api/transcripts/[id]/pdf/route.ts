@@ -49,13 +49,18 @@ export async function GET(
     const { data: items } = await supabase.from("transcript_items").select("*").eq("transcript_id", transcriptId).order("subject_name", { ascending: true });
 
     // Theme Logic
+    // Theme Logic
     let themeToUse = null;
-    const { data: curriculumTheme } = await supabase.from("transcript_themes").select("*").eq("is_default", true).eq("target_curriculum", transcript.profiles?.curriculum_type || 'ALL').maybeSingle();
-    themeToUse = curriculumTheme;
-    
-    if (!themeToUse) {
-        const { data: globalTheme } = await supabase.from("transcript_themes").select("*").eq("is_default", true).eq("target_curriculum", 'ALL').maybeSingle();
-        themeToUse = globalTheme || (await supabase.from("transcript_themes").select("*").eq("is_default", true).maybeSingle()).data;
+    try {
+        const { data: curriculumTheme } = await supabase.from("transcript_themes").select("*").eq("is_default", true).eq("target_curriculum", transcript.profiles?.curriculum_type || 'ALL').maybeSingle();
+        themeToUse = curriculumTheme;
+        
+        if (!themeToUse) {
+            const { data: globalTheme } = await supabase.from("transcript_themes").select("*").eq("is_default", true).eq("target_curriculum", 'ALL').maybeSingle();
+            themeToUse = globalTheme || (await supabase.from("transcript_themes").select("*").eq("is_default", true).maybeSingle()).data;
+        }
+    } catch (e) {
+        console.warn("Theme fetch failed, using default", e);
     }
         
     const theme = themeToUse || {
@@ -101,10 +106,24 @@ export async function GET(
          doc.rect(0, 0, 8, pageHeight, "F"); // Left accent bar
     }
 
+    // --- Watermark (Safe Try) ---
     if (theme.layout.show_watermark && settings?.logo_url) {
-        // NOTE: GState/Opacity logic disabled for stability.
-        // We log here to acknowledge the config but skip the render to avoid crashes.
-        // console.log("Watermark skipped for stability.");
+        try {
+            const logoData = (settings?.logo_url && typeof settings.logo_url === 'string') ? await fetchImage(settings.logo_url) : null;
+            if (logoData) {
+                // @ts-ignore - GState is standard but types may lag
+                if (doc.GState) {
+                    doc.saveGraphicsState();
+                    // @ts-ignore
+                    doc.setGState(new doc.GState({ opacity: 0.1 })); 
+                    const wmSize = 120;
+                    doc.addImage(logoData, "PNG", (pageWidth - wmSize) / 2, (pageHeight - wmSize) / 2, wmSize, wmSize);
+                    doc.restoreGraphicsState();
+                }
+            }
+        } catch (e) {
+            console.warn("Watermark render failed, skipping:", e);
+        }
     }
 
     // --- 2. Header Section ---
@@ -112,6 +131,23 @@ export async function GET(
     const logoData = (settings?.logo_url && typeof settings.logo_url === 'string') ? await fetchImage(settings.logo_url) : null;
     
     const schoolName = typeof settings?.school_name === 'string' ? settings.school_name : "SCHOOL NAME";
+    
+    // Right Header Metadata (OFFICIAL, Issued, ID)
+    const rightHeaderX = pageWidth - margin;
+    const rightHeaderY = 30; // Aligned with Logo/School Name
+    
+    // "OFFICIAL" Badge
+    doc.setTextColor("#14532d"); // Dark Green
+    doc.setFont(theme.fonts.header, "bold");
+    doc.setFontSize(8);
+    // Draw Lock Icon placeholder? maybe just text for now
+    doc.text("OFFICIAL", rightHeaderX, rightHeaderY, { align: "right" });
+    
+    doc.setTextColor(secondary);
+    doc.setFont(theme.fonts.body, "normal");
+    doc.setFontSize(7);
+    doc.text(`ISSUED: ${new Date().toLocaleDateString()}`, rightHeaderX, rightHeaderY + 4, { align: "right" });
+    doc.text(`ID: ${transcript.id.substring(0, 8).toUpperCase()}`, rightHeaderX, rightHeaderY + 8, { align: "right" });
 
     if (theme.layout.header_style === "flat_bar") {
         // Flat Bar Design
@@ -130,7 +166,7 @@ export async function GET(
         yPos = 70;
     } else {
         // Modern / Centered
-        if (logoData) try { doc.addImage(logoData, "PNG", (pageWidth - 30)/2, 20, 30, 30); } catch(e){}
+        if (logoData) try { doc.addImage(logoData, "PNG", (pageWidth - 30)/2, 20, 30, 30, undefined, 'FAST'); } catch(e){}
         
         yPos = 55;
         doc.setTextColor(primary);
@@ -188,17 +224,17 @@ export async function GET(
     const academicYear = transcript.exams?.academic_year || "";
     const term = transcript.exams?.term || "";
 
-    doc.setFontSize(11); doc.setTextColor(valueColor); doc.setFont(undefined, 'bold');
-    doc.text(fullName, leftX, yPos + 11);
-    doc.text(admNo, rightX, yPos + 11);
+    doc.setFontSize(11); doc.setTextColor(valueColor); doc.setFont(theme.fonts.body, 'bold');
+    doc.text(fullName || "", leftX, yPos + 11);
+    doc.text(admNo || "", rightX, yPos + 11);
     
-    doc.setFontSize(8); doc.setTextColor(labelColor); doc.setFont(undefined, 'normal');
+    doc.setFontSize(8); doc.setTextColor(labelColor); doc.setFont(theme.fonts.body, 'normal');
     doc.text("CURRENT CLASS", leftX, yPos + 20);
     doc.text("ACADEMIC PERIOD", rightX, yPos + 20);
     
-    doc.setFontSize(11); doc.setTextColor(valueColor); doc.setFont(undefined, 'bold');
-    doc.text(formClass, leftX, yPos + 26);
-    doc.text(`${examName} (${term} ${academicYear})`, rightX, yPos + 26);
+    doc.setFontSize(11); doc.setTextColor(valueColor); doc.setFont(theme.fonts.body, 'bold');
+    doc.text(formClass || "", leftX, yPos + 26);
+    doc.text(`${examName || ""} (${term || ""} ${academicYear || ""})`, rightX, yPos + 26);
     
     yPos += 45;
 
@@ -240,11 +276,11 @@ export async function GET(
         // Grade Pill Logic
         const gradeColor = item.grade === 'A' ? "#166534" : (item.grade === 'E' ? "#991b1b" : primary);
         doc.setTextColor(gradeColor);
-        doc.setFont(undefined, "bold");
+        doc.setFont(theme.fonts.table, "bold");
         doc.text(item.grade || "-", col3, yPos + 1);
         
         doc.setTextColor(secondary);
-        doc.setFont(undefined, "normal");
+        doc.setFont(theme.fonts.table, "normal");
         doc.setFontSize(8);
         doc.text((item.teacher_remarks || "").substring(0, 30), col4, yPos + 1);
         
@@ -280,32 +316,32 @@ export async function GET(
         // Box 1: Total
         doc.setDrawColor(primary);
         doc.roundedRect(margin, r1y, boxW, boxH, 2, 2, "S");
-        doc.setFontSize(8); doc.setTextColor(secondary);
+        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(theme.fonts.body, "normal");
         doc.text("TOTAL SCORE", margin + 10, r1y + 6);
-        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(undefined, "bold");
+        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(theme.fonts.body, "bold");
         doc.text(String(transcript.total_score || 0), margin + 10, r1y + 14);
         
         // Box 2: Average
         doc.roundedRect(margin + boxW + 10, r1y, boxW, boxH, 2, 2, "S");
-        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(undefined, "normal");
+        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(theme.fonts.body, "normal");
         doc.text("AVERAGE SCORE", margin + boxW + 20, r1y + 6);
-        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(undefined, "bold");
+        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(theme.fonts.body, "bold");
         doc.text(`${transcript.average_score || 0}%`, margin + boxW + 20, r1y + 14);
         
         const r2y = yPos + boxH + 5;
         // Box 3: Grade
         doc.setDrawColor(primary);
         doc.roundedRect(margin, r2y, boxW, boxH, 2, 2, "S");
-        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(undefined, "normal");
+        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(theme.fonts.body, "normal");
         doc.text("MEAN GRADE", margin + 10, r2y + 6);
-        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(undefined, "bold");
+        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(theme.fonts.body, "bold");
         doc.text(transcript.overall_grade || "-", margin + 10, r2y + 14);
         
         // Box 4: Position
         doc.roundedRect(margin + boxW + 10, r2y, boxW, boxH, 2, 2, "S");
-        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(undefined, "normal");
+        doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(theme.fonts.body, "normal");
         doc.text("CLASS POSITION", margin + boxW + 20, r2y + 6);
-        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(undefined, "bold");
+        doc.setFontSize(12); doc.setTextColor(primary); doc.setFont(theme.fonts.body, "bold");
         doc.text(String(transcript.class_position || "-"), margin + boxW + 20, r2y + 14);
         
         yPos = r2y + boxH + 15;
@@ -324,9 +360,9 @@ export async function GET(
     
     // Director's Remarks
     doc.setFontSize(8); doc.setTextColor(secondary);
-    doc.text("HEAD TEACHER'S REMARKS", margin, yPos);
+    doc.text("DIRECTOR'S REMARKS", margin, yPos);
     
-    doc.setFontSize(10); doc.setTextColor(text); doc.setFont(undefined, 'italic');
+    doc.setFontSize(10); doc.setTextColor(text); doc.setFont(theme.fonts.body, 'italic');
     doc.text(transcript.admin_remarks || "A diligent and disciplined student.", margin, yPos + 6);
     
     doc.setDrawColor(secondary);
@@ -341,7 +377,7 @@ export async function GET(
         if (sig) try { doc.addImage(sig, "PNG", margin, sigY - 15, 30, 15); } catch(e){}
     }
     
-    doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(undefined, "normal");
+    doc.setFontSize(8); doc.setTextColor(secondary); doc.setFont(theme.fonts.body, "normal");
     doc.text("----------------------------------------", margin, sigY);
     doc.text("AUTHORIZED SIGNATURE", margin, sigY + 5);
     
@@ -374,6 +410,7 @@ export async function GET(
     });
     
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error("PDF Generation Error:", error);
+    return NextResponse.json({ error: error.message || "Internal Server Error" }, { status: 500 });
   }
 }

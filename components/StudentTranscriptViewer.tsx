@@ -163,9 +163,20 @@ export default function StudentTranscriptViewer({
       });
       
       if (!response.ok) {
-        if (response.status === 403) throw new Error("You do not have permission to download this transcript.");
-        if (response.status === 404) throw new Error("Transcript not found or not published.");
-        throw new Error("Failed to generate PDF. Please try again later.");
+        let errorMessage = "Failed to generate PDF. Please try again later.";
+        try {
+          const errorData = await response.json();
+          if (errorData.error) errorMessage = errorData.error;
+        } catch (e) {
+          // If json parse fails, try text
+          const errorText = await response.text();
+          if (errorText) errorMessage = errorText;
+        }
+        
+        if (response.status === 403) errorMessage = "You do not have permission to download this transcript.";
+        if (response.status === 404) errorMessage = "Transcript not found or not published.";
+        
+        throw new Error(errorMessage);
       }
 
       const blob = await response.blob();

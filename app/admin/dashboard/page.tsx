@@ -131,20 +131,29 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     async function init() {
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (session?.user) {
-         setAdminId(session.user.id);
-         fetchData();
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (session?.user) {
+           setAdminId(session.user.id);
+           setLoading(false); // Stop loading immediately after auth is confirmed
+           fetchData(); // Run data fetching in background
+        } else {
+           // No session, redirect handled by middleware/layout usually, but safe to stop loading
+           setLoading(false);
+        }
+      } catch (error) {
+        console.error("Dashboard init error:", error);
+        setLoading(false);
       }
-      setLoading(false);
     }
     
     init();
   }, []);
 
   async function fetchData() {
-    // Fetch teachers with their preferences
+    try {
+      // Fetch teachers with their preferences
     const { data: teachersData } = await supabase
       .from("profiles")
       .select("id, full_name, subject, created_at")
@@ -189,6 +198,9 @@ export default function AdminDashboard() {
       .select("*")
       .order("assigned_at", { ascending: false });
     if (assignmentsData) setTeacherClasses(assignmentsData);
+    } catch (error) {
+      console.error("Error fetching admin dashboard data:", error);
+    }
   }
 
   async function handleCreateClass() {
