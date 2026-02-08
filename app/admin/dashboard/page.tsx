@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import {
   ShieldCheck,
   Users,
@@ -49,10 +49,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import MessagingCenter from "@/components/MessagingCenter";
 import { MessageSquare } from "lucide-react";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Teacher {
   id: string;
@@ -133,12 +130,12 @@ export default function AdminDashboard() {
   const [assignmentCurriculum, setAssignmentCurriculum] = useState<string>("8-4-4"); // For assignment modal
 
   useEffect(() => {
-    // Auth is handled by layout.tsx - just fetch data
     async function init() {
       const { data: { session } } = await supabase.auth.getSession();
+      
       if (session?.user) {
-        setAdminId(session.user.id);
-        fetchData();
+         setAdminId(session.user.id);
+         fetchData();
       }
       setLoading(false);
     }

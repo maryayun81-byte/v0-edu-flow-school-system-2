@@ -606,18 +606,50 @@ export default function AdminTranscriptManager() {
       }
   }
 
-  function getThemeClasses(theme: string = "Modern") {
-     const base = "min-h-[900px] relative p-12 transition-all duration-300 print:min-h-screen";
-    switch(theme) {
-      case "Classic": return `${base} font-serif bg-white text-black border-[3px] border-double border-black`;
-      case "Elegant": return `${base} font-serif bg-[#FFFAF0] text-slate-900 border-[6px] border-double border-amber-300 shadow-inner`;
-      case "Professional": return `${base} font-sans bg-white text-slate-800 border bg-[url('/bg-grid.png')]`;
-      case "Minimalist": return `${base} font-light bg-white text-neutral-600 tracking-wide`;
-      case "Academic": return `${base} font-serif bg-white text-black border-[12px] border-double border-[#800000]/20`;
-      case "Tech": return `${base} font-mono bg-slate-50 text-slate-900 border-l-8 border-slate-900`;
-      case "Creative": return `${base} font-sans bg-white text-purple-900 rounded-3xl border-4 border-dashed border-purple-200`;
-      default: return `${base} font-sans bg-white text-black`; // Modern
+  // Theme State
+  const [activeTheme, setActiveTheme] = useState<any>(null);
+
+  // Fetch active theme when preview opens
+  useEffect(() => {
+    if (previewTranscript && previewTranscript.curriculum_type) {
+        fetchActiveTheme(previewTranscript.curriculum_type);
     }
+  }, [previewTranscript]);
+
+  async function fetchActiveTheme(curriculum: string) {
+      // 1. Try Curriculum Specific
+      let { data } = await supabase
+        .from("transcript_themes")
+        .select("*")
+        .eq("is_default", true)
+        .eq("target_curriculum", curriculum)
+        .maybeSingle();
+      
+      // 2. Fallback to Global
+      if (!data) {
+          const { data: global } = await supabase
+            .from("transcript_themes")
+            .select("*")
+            .eq("is_default", true)
+            .eq("target_curriculum", 'ALL')
+            .maybeSingle();
+          data = global;
+      }
+      
+      if (data) setActiveTheme(data);
+  }
+
+  function getThemeStyles() {
+      if (!activeTheme) return {}; // Default styles handled by CSS classes?
+      
+      return {
+          '--primary': activeTheme.colors.primary,
+          '--secondary': activeTheme.colors.secondary,
+          '--accent': activeTheme.colors.accent,
+          '--text': activeTheme.colors.text,
+          '--bg': activeTheme.colors.background,
+          fontFamily: activeTheme.fonts.body,
+      } as React.CSSProperties;
   }
   
   // Filter transcripts for view
@@ -642,7 +674,17 @@ export default function AdminTranscriptManager() {
              </div>
              
              {/* Printable Area */}
-            <div className={`mx-auto ${getThemeClasses(settings?.transcript_theme)}`} style={{ maxWidth: "210mm" }}>
+            <div 
+                className="mx-auto min-h-[900px] relative p-12 transition-all duration-300 print:min-h-screen shadow-2xl" 
+                style={{ 
+                    maxWidth: "210mm",
+                    backgroundColor: activeTheme?.colors?.background || '#ffffff',
+                    color: activeTheme?.colors?.text || '#000000',
+                    fontFamily: activeTheme?.fonts?.body || 'inherit',
+                    // Border logic
+                    border: activeTheme?.layout?.show_border ? `2px solid ${activeTheme?.colors?.primary}` : 'none'
+                }}
+            >
                
                {/* WATERMARK */}
               {settings?.logo_url && (
@@ -656,15 +698,24 @@ export default function AdminTranscriptManager() {
                  {settings?.logo_url && (
                    <img src={settings.logo_url} alt="School Logo" className="h-32 w-32 object-contain" />
                  )}
-                 <div className="flex-1 text-center px-8">
-                    <h1 className="text-4xl font-black uppercase tracking-widest mb-2 font-serif">
-                       {settings?.school_name || "Official Transcript"}
-                    </h1>
-                    <div className="text-xs uppercase tracking-[0.3em] opacity-70 mb-4">Excellence • Integrity • Knowledge</div>
-                    <h2 className="text-2xl font-bold bg-black/5 inline-block px-8 py-1 rounded-sm uppercase tracking-wide">
-                      Academic Transcript
-                    </h2>
-                 </div>
+                  <div className="flex-1 text-center px-8">
+                     <h1 
+                        className="text-4xl font-black uppercase tracking-widest mb-2"
+                        style={{ fontFamily: activeTheme?.fonts?.header || 'inherit', color: activeTheme?.colors?.primary || 'inherit' }}
+                     >
+                        {settings?.school_name || "Official Transcript"}
+                     </h1>
+                     <div className="text-xs uppercase tracking-[0.3em] opacity-70 mb-4" style={{ color: activeTheme?.colors?.secondary }}>Excellence • Integrity • Knowledge</div>
+                     <h2 
+                        className="text-2xl font-bold inline-block px-8 py-1 rounded-sm uppercase tracking-wide"
+                        style={{ 
+                            backgroundColor: activeTheme?.layout?.header_style === 'flat_bar' ? activeTheme?.colors?.primary : 'rgba(0,0,0,0.05)',
+                            color: activeTheme?.layout?.header_style === 'flat_bar' ? '#ffffff' : (activeTheme?.colors?.text || 'inherit') 
+                        }}
+                     >
+                       Academic Transcript
+                     </h2>
+                  </div>
                  <div className="text-right text-xs opacity-70 space-y-1 w-32">
                     <p className="font-bold">{new Date().getFullYear()}</p>
                     <p>Generated on</p>

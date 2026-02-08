@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import {
   Settings,
   Image as ImageIcon,
@@ -27,6 +27,7 @@ import {
 import GradingSystemManager from "./GradingSystemManager";
 import SignatureManager from "./SignatureManager";
 import TeacherClassManager from "./TeacherClassManager";
+import TranscriptThemeManager from "./TranscriptThemeManager";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -59,10 +60,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface SchoolSettings {
   id: string;
@@ -644,37 +642,7 @@ export default function AdminSettingsTab() {
 
         {/* THEMES TAB */}
         <TabsContent value="themes" className="space-y-4 py-4">
-           <div className="bg-card border border-border/50 rounded-xl p-6 space-y-6">
-            <h3 className="font-semibold flex items-center gap-2">
-              <Palette className="w-4 h-4" /> Transcript Theme
-            </h3>
-            
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              {THEMES.map(theme => (
-                <div 
-                  key={theme.id}
-                  onClick={() => settings && setSettings({...settings, transcript_theme: theme.id})}
-                  className={`
-                    relative group cursor-pointer rounded-xl border-2 transition-all p-1
-                    ${settings?.transcript_theme === theme.id ? 'border-primary ring-2 ring-primary/20' : 'border-transparent hover:border-border'}
-                  `}
-                >
-                  <div className={`h-24 rounded-lg mb-2 ${theme.color} opacity-80 flex items-center justify-center text-white font-bold shadow-sm`}>
-                    {theme.id}
-                  </div>
-                  <div className="px-2 pb-2">
-                    <h4 className="font-medium text-sm">{theme.name}</h4>
-                    <p className="text-[10px] text-muted-foreground">{theme.desc}</p>
-                  </div>
-                  {settings?.transcript_theme === theme.id && (
-                    <div className="absolute top-2 right-2 bg-primary text-primary-foreground w-6 h-6 rounded-full flex items-center justify-center shadow-md">
-                      <Check className="w-3 h-3" />
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
+             <TranscriptThemeManager />
         </TabsContent>
 
         {/* ADMINS TAB */}

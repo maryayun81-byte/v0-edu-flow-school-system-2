@@ -2,8 +2,6 @@
 
 import { useState, useEffect, useRef } from "react";
 import { createClient } from "@supabase/supabase-js";
-import html2canvas from "html2canvas";
-import jsPDF from "jspdf";
 import {
   Download,
   X,
@@ -147,47 +145,44 @@ export default function StudentTranscriptViewer({
   }
 
   async function handleDownloadPDF() {
-    if (!transcriptRef.current || !transcript) return;
+    if (!transcript) return;
 
+    setLoading(true);
     try {
-      const canvas = await html2canvas(transcriptRef.current, {
-        scale: 2, // Higher scale for better quality
-        useCORS: true, // Handle cross-origin images (like signatures)
-        logging: false,
-        backgroundColor: '#ffffff',
-        windowWidth: 1600, // Force desktop width for responsive PDF generation
-      });
-
-      const imgData = canvas.toDataURL("image/jpeg", 0.95);
-      const pdf = new jsPDF({
-        orientation: "portrait",
-        unit: "mm",
-        format: "a4",
-      });
-
-      const imgWidth = 210; // A4 width in mm
-      const pageHeight = 297; // A4 height in mm
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      // Get the current session token explicitly
+      const { data: { session } } = await supabase.auth.getSession();
       
-      let heightLeft = imgHeight;
-      let position = 0;
-
-      // Add first page
-      pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-      heightLeft -= pageHeight;
-
-      // If content overflows (should be avoided by design, but handling it just in case)
-      while (heightLeft >= 0) {
-        position = heightLeft - imgHeight;
-        pdf.addPage();
-        pdf.addImage(imgData, "JPEG", 0, position, imgWidth, imgHeight);
-        heightLeft -= pageHeight;
+      if (!session) {
+        throw new Error("You are not logged in.");
+      }
+      
+      const response = await fetch(`/api/transcripts/${transcript.id}/pdf`, {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`
+        }
+      });
+      
+      if (!response.ok) {
+        if (response.status === 403) throw new Error("You do not have permission to download this transcript.");
+        if (response.status === 404) throw new Error("Transcript not found or not published.");
+        throw new Error("Failed to generate PDF. Please try again later.");
       }
 
-      pdf.save(`Transcript_${transcript.student_name.replace(/\s+/g, "_")}_${transcript.term}.pdf`);
-    } catch (error) {
-      console.error("PDF Generation failed:", error);
-      alert("Failed to generate PDF. Please try again.");
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `Transcript_${transcript.student_name.replace(/\s+/g, "_")}_${transcript.term}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+      
+    } catch (error: any) {
+      console.error("PDF Download Error:", error);
+      alert(error.message || "Failed to download PDF");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -413,7 +408,6 @@ export default function StudentTranscriptViewer({
 
         {/* The Actual Transcript (A4) - STRICT STYLING FOR PDF */}
         <div 
-          ref={transcriptRef} 
           className={getThemeClasses(settings?.transcript_theme)}
           style={{ backgroundColor: '#ffffff', color: '#000000' }}
         >

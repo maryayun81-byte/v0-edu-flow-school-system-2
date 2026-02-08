@@ -5,16 +5,13 @@ import React from "react"
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { ShieldCheck, Mail, Lock, Eye, EyeOff, ArrowLeft, Loader2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 export default function AdminLogin() {
   const router = useRouter();
@@ -56,7 +53,9 @@ export default function AdminLogin() {
           return;
         }
 
-        router.push("/admin/dashboard");
+        // router.push("/admin/dashboard");
+        // Force full reload to ensure cookies are sent to server
+        window.location.href = "/admin/dashboard";
       }
     } catch (err) {
       setError("An unexpected error occurred");
