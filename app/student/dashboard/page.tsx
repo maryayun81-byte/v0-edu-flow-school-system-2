@@ -45,6 +45,8 @@ import { StudentDashboardSkeleton } from "@/components/DashboardSkeleton";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
 import StudentResults from "@/components/StudentResults";
 import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
+import StudentCalendar from "@/components/StudentCalendar";
+import StudentUpcomingExams from "@/components/StudentUpcomingExams";
 
 
 const supabase = createClient(
@@ -707,46 +709,57 @@ export default function StudentDashboard() {
               </div>
             </div>
 
-            {/* Quick Stats */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
-              <div className="bg-card border border-border/50 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-                    <FileText className="w-5 h-5 text-primary" />
-                  </div>
-                </div>
-                <p className="text-2xl font-bold text-foreground">{notes.length}</p>
-                <p className="text-sm text-muted-foreground">Study Materials</p>
+            {/* Upcoming Exams Section */}
+            {profile && <StudentUpcomingExams studentClassName={profile.form_class} />}
+
+            {/* Content Grid: Calendar + Stats */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Calendar - Left Column on Desktop */}
+              <div className="lg:col-span-1">
+                <StudentCalendar />
               </div>
 
-              <div className="bg-card border border-border/50 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-chart-3/20 rounded-lg flex items-center justify-center">
-                    <Target className="w-5 h-5 text-chart-3" />
+              {/* Stats - Right Column on Desktop */}
+              <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-card border border-border/50 rounded-xl p-5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
+                      <FileText className="w-5 h-5 text-primary" />
+                    </div>
                   </div>
+                  <p className="text-2xl font-bold text-foreground">{notes.length}</p>
+                  <p className="text-sm text-muted-foreground">Study Materials</p>
                 </div>
-                <p className="text-2xl font-bold text-foreground">{pendingAssignments.length}</p>
-                <p className="text-sm text-muted-foreground">Pending Tasks</p>
-              </div>
 
-              <div className="bg-card border border-border/50 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
-                    <Brain className="w-5 h-5 text-accent" />
+                <div className="bg-card border border-border/50 rounded-xl p-5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-chart-3/20 rounded-lg flex items-center justify-center">
+                      <Target className="w-5 h-5 text-chart-3" />
+                    </div>
                   </div>
+                  <p className="text-2xl font-bold text-foreground">{pendingAssignments.length}</p>
+                  <p className="text-sm text-muted-foreground">Pending Tasks</p>
                 </div>
-                <p className="text-2xl font-bold text-foreground">{quizzes.length}</p>
-                <p className="text-sm text-muted-foreground">Available Quizzes</p>
-              </div>
 
-              <div className="bg-card border border-border/50 rounded-xl p-5">
-                <div className="flex items-center gap-3 mb-2">
-                  <div className="w-10 h-10 bg-destructive/20 rounded-lg flex items-center justify-center">
-                    <Clock className="w-5 h-5 text-destructive" />
+                <div className="bg-card border border-border/50 rounded-xl p-5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
+                      <Brain className="w-5 h-5 text-accent" />
+                    </div>
                   </div>
+                  <p className="text-2xl font-bold text-foreground">{quizzes.length}</p>
+                  <p className="text-sm text-muted-foreground">Available Quizzes</p>
                 </div>
-                <p className="text-2xl font-bold text-foreground">{todayClasses.length}</p>
-                <p className="text-sm text-muted-foreground">Classes Today</p>
+
+                <div className="bg-card border border-border/50 rounded-xl p-5">
+                  <div className="flex items-center gap-3 mb-2">
+                    <div className="w-10 h-10 bg-destructive/20 rounded-lg flex items-center justify-center">
+                      <Clock className="w-5 h-5 text-destructive" />
+                    </div>
+                  </div>
+                  <p className="text-2xl font-bold text-foreground">{todayClasses.length}</p>
+                  <p className="text-sm text-muted-foreground">Classes Today</p>
+                </div>
               </div>
             </div>
 
