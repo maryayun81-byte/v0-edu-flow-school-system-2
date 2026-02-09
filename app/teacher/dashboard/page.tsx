@@ -333,6 +333,16 @@ export default function TeacherDashboard() {
   const renderContent = () => {
     switch (activeTab) {
       case 'home':
+        return (
+          <div className="text-center py-12 animate-[fadeIn_0.3s_ease-out]">
+            <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-8 max-w-2xl mx-auto">
+              <TrendingUp className="w-16 h-16 text-indigo-500 mx-auto mb-4" />
+              <h2 className="text-2xl font-bold text-white mb-2">Welcome Back, {userProfile?.full_name || 'Teacher'}!</h2>
+              <p className="text-gray-400">Select a tab above to manage your classes, assignments, and content.</p>
+            </div>
+          </div>
+        );
+
       case 'notes':
         return (
           <div className="space-y-6">
