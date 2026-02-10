@@ -46,6 +46,7 @@ import MessagingCenter from '@/components/MessagingCenter';
 import EventManager from '@/components/EventManager';
 import TeacherMarkEntry from '@/components/teacher/TeacherMarkEntry';
 import TeacherOnboardingModal from '@/components/TeacherOnboardingModal';
+import TeacherHome from '@/components/teacher/TeacherHome';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -96,6 +97,12 @@ export default function TeacherDashboard() {
   const [timetables, setTimetables] = useState<TimetableEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [showNoteForm, setShowNoteForm] = useState(false);
+  const [initialChatUserId, setInitialChatUserId] = useState<string | null>(null);
+
+  const startChatWithUser = (userId: string) => {
+    setInitialChatUserId(userId);
+    setActiveTab('messages');
+  };
   const [showAssignmentForm, setShowAssignmentForm] = useState(false);
   const [showTimetableForm, setShowTimetableForm] = useState(false);
   const [notifications, setNotifications] = useState<string[]>([]);
@@ -334,13 +341,11 @@ export default function TeacherDashboard() {
     switch (activeTab) {
       case 'home':
         return (
-          <div className="text-center py-12 animate-[fadeIn_0.3s_ease-out]">
-            <div className="bg-white/5 backdrop-blur-xl rounded-2xl border border-white/10 p-8 max-w-2xl mx-auto">
-              <TrendingUp className="w-16 h-16 text-indigo-500 mx-auto mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-2">Welcome Back, {userProfile?.full_name || 'Teacher'}!</h2>
-              <p className="text-gray-400">Select a tab above to manage your classes, assignments, and content.</p>
-            </div>
-          </div>
+          <TeacherHome 
+            userId={user?.id} 
+            userName={userProfile?.full_name || 'Teacher'} 
+            onNavigate={(tab) => handleTabChange(tab)}
+          />
         );
 
       case 'notes':
@@ -478,30 +483,30 @@ export default function TeacherDashboard() {
         );
 
       case 'students':
-        return user ? (
-          <div key="students" className="space-y-6">
-            <MyStudents teacherId={user.id} onStartChat={handleStartChat} />
+        return (
+          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+            <MyStudents teacherId={user?.id} onStartChat={startChatWithUser} />
           </div>
-        ) : null;
+        );
 
       case 'profile':
         return (
-          <div key="profile" className="space-y-6">
+          <div className="space-y-6">
             <TeacherProfile userId={user?.id} onClose={() => setActiveTab('notes')} />
           </div>
         );
 
       case 'messages':
-        return user ? (
-          <div key="messages" className="space-y-6">
-            <MessagingCenter
-              userId={user.id}
-              userRole="teacher"
-              userName={userProfile?.full_name || ''}
-              initialChatUserId={chatUserId}
+        return (
+          <div className="animate-[fadeIn_0.3s_ease-out]">
+            <MessagingCenter 
+              userId={user?.id} 
+              userRole="teacher" 
+              userName={userProfile?.full_name || 'Teacher'}
+              initialChatUserId={initialChatUserId}
             />
           </div>
-        ) : null;
+        );
 
       case 'events':
         return user ? (
