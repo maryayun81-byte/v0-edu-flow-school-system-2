@@ -26,6 +26,7 @@ import {
   FileText,
   Trophy,
   Settings,
+  ClipboardList,
 } from "lucide-react";
 import EventManager from "@/components/EventManager";
 import TuitionManager from "@/components/TuitionManager";
@@ -35,6 +36,10 @@ import AdminExamManager from "@/components/admin/AdminExamManager";
 import AdminTranscriptManager from "@/components/admin/AdminTranscriptManager";
 import AdminSettingsTab from "@/components/admin/AdminSettingsTab";
 import { DashboardTabNavigation } from "@/components/DashboardTabNavigation";
+import TuitionEventManager from "@/components/admin/TuitionEventManager";
+import ClassTeacherManager from "@/components/admin/ClassTeacherManager";
+import ExamEligibilityList from "@/components/admin/ExamEligibilityList";
+import AttendanceAnalytics from "@/components/admin/AttendanceAnalytics";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -107,7 +112,8 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings" | "attendance">("overview");
+  const [attendanceSubTab, setAttendanceSubTab] = useState<"analytics" | "events" | "class-teachers" | "eligibility">("analytics");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
@@ -166,8 +172,8 @@ export default function AdminDashboard() {
         .from("teacher_subject_preferences")
         .select("teacher_id, subject, preferred_classes");
 
-      const teachersWithDetails = teachersData.map(t => {
-        const prefs = preferencesData?.filter(p => p.teacher_id === t.id) || [];
+      const teachersWithDetails = teachersData.map((t: { id: string; full_name: string; subject?: string; created_at: string }) => {
+        const prefs = preferencesData?.filter((p: { teacher_id: string; subject: string; preferred_classes: string[] }) => p.teacher_id === t.id) || [];
         return {
           ...t,
           email: `teacher-${t.id.slice(0, 8)}@eduflow.app`,
@@ -617,6 +623,7 @@ export default function AdminDashboard() {
             { id: "teachers", label: "Teachers", icon: Users },
             { id: "classes", label: "Classes", icon: School },
             { id: "students", label: "Students", icon: GraduationCap },
+            { id: "attendance", label: "Attendance", icon: ClipboardList },
             { id: "exams", label: "Exams", icon: FileText },
             { id: "transcripts", label: "Transcripts", icon: Trophy },
             { id: "assignments", label: "Assignments", icon: BookOpen },
@@ -949,6 +956,37 @@ export default function AdminDashboard() {
                 </table>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* Attendance Tab */}
+        {activeTab === "attendance" && adminId && (
+          <div className="space-y-6">
+            {/* Sub-Tab Navigation */}
+            <div className="flex gap-2 flex-wrap">
+              {[
+                { id: "analytics", label: "Analytics & Alerts" },
+                { id: "events", label: "Tuition Events" },
+                { id: "class-teachers", label: "Class Teachers" },
+                { id: "eligibility", label: "Exam Eligibility" },
+              ].map(sub => (
+                <button
+                  key={sub.id}
+                  onClick={() => setAttendanceSubTab(sub.id as typeof attendanceSubTab)}
+                  className={`px-4 py-2 rounded-xl text-sm font-medium transition-all border ${
+                    attendanceSubTab === sub.id
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card text-muted-foreground border-border/50 hover:text-foreground hover:border-primary/40"
+                  }`}
+                >
+                  {sub.label}
+                </button>
+              ))}
+            </div>
+            {attendanceSubTab === "analytics" && <AttendanceAnalytics />}
+            {attendanceSubTab === "events" && <TuitionEventManager adminId={adminId} />}
+            {attendanceSubTab === "class-teachers" && <ClassTeacherManager adminId={adminId} />}
+            {attendanceSubTab === "eligibility" && <ExamEligibilityList adminId={adminId} />}
           </div>
         )}
 

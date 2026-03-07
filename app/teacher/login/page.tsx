@@ -3,16 +3,13 @@
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { BookOpen, Lock, Eye, EyeOff, ArrowLeft, Loader2, Sparkles, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 export default function TeacherLogin() {
   const router = useRouter();
@@ -40,6 +37,20 @@ export default function TeacherLogin() {
       }
 
       if (data?.user) {
+        // Verify the user has a teacher or admin role
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', data.user.id)
+          .maybeSingle();
+
+        if (profile && profile.role !== 'teacher' && profile.role !== 'admin') {
+          setError('This portal is for teachers only. Please use the student portal.');
+          await supabase.auth.signOut();
+          setLoading(false);
+          return;
+        }
+
         router.push('/teacher/dashboard');
       }
     } catch (err) {

@@ -1,15 +1,8 @@
 'use client';
 
-import React from "react"
-
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from '@/lib/supabase/client';
 
 export default function DashboardLayout({
   children,
@@ -20,44 +13,44 @@ export default function DashboardLayout({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+    const supabase = createClient();
 
-        if (!session) {
-          router.push('/teacher/login');
+    async function checkAuth() {
+      try {
+        // getUser() makes a live server request — more reliable than getSession()
+        // which reads from local storage and can be stale right after login.
+        const { data: { user }, error } = await supabase.auth.getUser();
+
+        if (error || !user) {
+          router.replace('/teacher/login');
           return;
         }
 
         setLoading(false);
-      } catch (error) {
-        console.error('Auth check error:', error);
-        router.push('/teacher/login');
+      } catch {
+        router.replace('/teacher/login');
       }
-    };
+    }
 
     checkAuth();
 
-    // Subscribe to auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session && event !== 'INITIAL_SESSION') {
-        router.push('/teacher/login');
+    // Only redirect on explicit SIGNED_OUT — don't redirect on token refresh events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: import('@supabase/supabase-js').AuthChangeEvent, session: import('@supabase/supabase-js').Session | null) => {
+      if (event === 'SIGNED_OUT') {
+        router.replace('/teacher/login');
+      } else if (session && loading) {
+        setLoading(false);
       }
     });
 
-    return () => {
-      subscription?.unsubscribe();
-    };
-  }, [router]);
+    return () => subscription.unsubscribe();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-indigo-50 to-blue-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600" />
+      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-500" />
       </div>
     );
   }

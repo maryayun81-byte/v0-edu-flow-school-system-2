@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
+import { AuthChangeEvent, Session, User as SupabaseUser } from '@supabase/supabase-js';
 import {
   LogOut,
   Plus,
@@ -24,13 +25,22 @@ import {
   Trophy,
   User,
   Settings,
+  LayoutDashboard,
+  Users,
   ChevronDown,
   X,
-  Users,
   CalendarDays,
   MessageSquare,
   Home,
-} from 'lucide-react';
+  ClipboardList,
+  ClipboardCheck
+} from "lucide-react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger
+} from "@/components/ui/tabs";
 import { FloatingActionMenu } from '@/components/FloatingActionMenu';
 import AssignmentWizard from '@/components/AssignmentWizard';
 import { TeacherDashboardSkeleton } from '@/components/TeacherDashboardSkeleton';
@@ -47,11 +57,11 @@ import EventManager from '@/components/EventManager';
 import TeacherMarkEntry from '@/components/teacher/TeacherMarkEntry';
 import TeacherOnboardingModal from '@/components/TeacherOnboardingModal';
 import TeacherHome from '@/components/teacher/TeacherHome';
+import AttendanceRegister from '@/components/attendance/AttendanceRegister';
+import AttendanceReminderModal from '@/components/attendance/AttendanceReminderModal';
+import TeacherAttendanceAnalytics from '@/components/teacher/TeacherAttendanceAnalytics';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Note {
   id: string;
@@ -88,8 +98,9 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 
 export default function TeacherDashboard() {
   const router = useRouter();
-  const [user, setUser] = useState<any>(null);
-  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages' | 'marks'>('notes');
+  const [user, setUser] = useState<SupabaseUser | null>(null);
+  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages' | 'marks' | 'attendance'>('notes');
+  const [attendanceRegisterSubmitted, setAttendanceRegisterSubmitted] = useState(false);
   const [showQuizBuilder, setShowQuizBuilder] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -117,25 +128,61 @@ export default function TeacherDashboard() {
   const [showOnboarding, setShowOnboarding] = useState(false);
 
   useEffect(() => {
-    // Auth is handled by layout.tsx - just get user session
     async function init() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.user) {
-        setUser(session.user);
+      try {
+        const { data: { user: authUser }, error } = await supabase.auth.getUser();
+        if (error || !authUser) {
+          router.replace('/teacher/login');
+          return;
+        }
+
+        setUser(authUser);
+      } catch (error) {
+        console.error('Dashboard init error:', error);
+        router.replace('/teacher/login');
       }
     }
     init();
-  }, []);
+
+    // Listen for auth changes - only redirect on explicit sign out,
+    // and only update user state when user ID actually changes (prevents re-render loop from TOKEN_REFRESHED events)
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event: import('@supabase/supabase-js').AuthChangeEvent, session: import('@supabase/supabase-js').Session | null) => {
+      if (session?.user) {
+        setUser(prev => (prev?.id === session.user.id ? prev : session.user));
+      } else if (_event === 'SIGNED_OUT') {
+        router.push('/');
+      }
+    });
+
+    return () => subscription.unsubscribe();
+  }, [router]);
 
   useEffect(() => {
-    if (user) {
-      fetchContent();
-      fetchUserProfile();
-      fetchNotifications();
-      setupRealtimeSubscriptions();
-      // Set loading to false after initial data fetch
-      setLoading(false);
+    if (!user) return;
+
+    async function loadAllData() {
+      try {
+        // Run all initial fetches in parallel without blocking each other
+        await Promise.allSettled([
+          fetchContent(),
+          fetchUserProfile(),
+          fetchNotifications()
+        ]);
+      } catch (err) {
+        console.error("Error during initial data load:", err);
+      } finally {
+        // Ensure loading is stopped regardless of fetch success
+        setLoading(false);
+      }
     }
+
+    loadAllData();
+    
+    // Setup and cleanup subscriptions
+    const cleanup = setupRealtimeSubscriptions();
+    return () => {
+      if (typeof cleanup === 'function') cleanup();
+    };
   }, [user]);
 
   async function fetchNotifications() {
@@ -145,13 +192,13 @@ export default function TeacherDashboard() {
         .select('*')
         // Safety filter: ensure we only get notifications for teachers or this specific user
         // (RLS handles this securely, but this adds clarity to the intention)
-        .or(`target_role.eq.teacher,target_user_id.eq.${user.id}`)
+        .or(`target_role.eq.teacher,target_user_id.eq.${user?.id}`)
         .order('created_at', { ascending: false })
         .limit(50);
 
       if (data) {
         // Double check client side to filter out any stray student notifs if RLS was delayed
-        const validNotifs = data.filter(n => n.target_role !== 'student');
+        const validNotifs = data.filter((n: any) => n.target_role !== 'student');
         setAllNotifications(validNotifs);
         setUnreadNotifCount(validNotifs.filter((n: any) => !n.is_read).length);
       }
@@ -165,8 +212,8 @@ export default function TeacherDashboard() {
       const { data } = await supabase
         .from('profiles')
         .select('full_name, avatar_url, onboarding_completed')
-        .eq('id', user.id)
-        .single();
+        .eq('id', user!.id)
+        .maybeSingle();
       if (data) {
         setUserProfile(data);
         if (data.onboarding_completed === false) {
@@ -310,6 +357,7 @@ export default function TeacherDashboard() {
     { id: 'home', label: 'Home', icon: Home, count: null },
     { id: 'notes', label: 'Notes', icon: FileText, count: activeNotes.length },
     { id: 'assignments', label: 'Assignments', icon: Calendar, count: activeAssignments.length },
+    { id: 'attendance', label: 'Attendance', icon: ClipboardList, count: null },
     { id: 'marks', label: 'Marks', icon: Trophy, count: null },
     { id: 'timetable', label: 'Timetable', icon: Clock, count: timetables.length },
     { id: 'quizzes', label: 'Quizzes', icon: Brain, count: null },
@@ -342,7 +390,7 @@ export default function TeacherDashboard() {
       case 'home':
         return (
           <TeacherHome 
-            userId={user?.id} 
+            userId={user!.id} 
             userName={userProfile?.full_name || 'Teacher'} 
             onNavigate={(tab) => handleTabChange(tab)}
           />
@@ -353,7 +401,7 @@ export default function TeacherDashboard() {
           <div className="space-y-6">
             {showNoteForm && (
               <div className="animate-[fadeIn_0.3s_ease-out]">
-                <NotesManager userId={user?.id} onClose={() => { setShowNoteForm(false); fetchContent(); }} />
+                <NotesManager userId={user!.id} onClose={() => { setShowNoteForm(false); fetchContent(); }} />
               </div>
             )}
             {!showNoteForm && (
@@ -424,7 +472,7 @@ export default function TeacherDashboard() {
           <div className="space-y-6">
             {showTimetableForm && (
               <div className="animate-[fadeIn_0.3s_ease-out]">
-                <TimetableManager userId={user?.id} onClose={() => { setShowTimetableForm(false); fetchContent(); }} />
+                <TimetableManager userId={user!.id} onClose={() => { setShowTimetableForm(false); fetchContent(); }} />
               </div>
             )}
             {!showTimetableForm && (
@@ -478,21 +526,21 @@ export default function TeacherDashboard() {
       case 'quizzes':
         return (
           <div key="quizzes" className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            <QuizBuilder userId={user?.id} onClose={() => setShowQuizBuilder(false)} />
+            <QuizBuilder userId={user!.id} onClose={() => setShowQuizBuilder(false)} />
           </div>
         );
 
       case 'students':
         return (
           <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-            <MyStudents teacherId={user?.id} onStartChat={startChatWithUser} />
+            <MyStudents teacherId={user!.id} onStartChat={startChatWithUser} />
           </div>
         );
 
       case 'profile':
         return (
           <div className="space-y-6">
-            <TeacherProfile userId={user?.id} onClose={() => setActiveTab('notes')} />
+            <TeacherProfile userId={user!.id} onClose={() => setActiveTab('notes')} />
           </div>
         );
 
@@ -500,7 +548,7 @@ export default function TeacherDashboard() {
         return (
           <div className="animate-[fadeIn_0.3s_ease-out]">
             <MessagingCenter 
-              userId={user?.id} 
+              userId={user!.id} 
               userRole="teacher" 
               userName={userProfile?.full_name || 'Teacher'}
               initialChatUserId={initialChatUserId}
@@ -624,6 +672,34 @@ export default function TeacherDashboard() {
           </div>
         );
 
+      case 'attendance':
+        return user ? (
+          <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
+                <Tabs defaultValue="register" className="space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-4">
+                    <TabsList className="bg-muted/50 p-1 border border-border/50">
+                      <TabsTrigger value="register" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                        <ClipboardCheck className="w-4 h-4 mr-2" />
+                        Mark Register
+                      </TabsTrigger>
+                      <TabsTrigger value="analytics" className="data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">
+                        <TrendingUp className="w-4 h-4 mr-2" />
+                        Class Analytics
+                      </TabsTrigger>
+                    </TabsList>
+                  </div>
+
+                  <TabsContent value="register" className="mt-0 border-none p-0">
+                    <AttendanceRegister teacherId={user.id} />
+                  </TabsContent>
+
+                  <TabsContent value="analytics" className="mt-0 border-none p-0">
+                    <TeacherAttendanceAnalytics teacherId={user.id} />
+                  </TabsContent>
+                </Tabs>
+          </div>
+        ) : null;
+
       default:
         return null;
     }
@@ -639,6 +715,18 @@ export default function TeacherDashboard() {
           onComplete={() => {
             setShowOnboarding(false);
             fetchUserProfile(); // Refresh profile to get updated onboarding status
+          }}
+        />
+      )}
+
+      {/* Attendance Reminder Modal */}
+      {user && (
+        <AttendanceReminderModal
+          teacherId={user.id}
+          registerSubmitted={attendanceRegisterSubmitted}
+          onMarkRegister={() => {
+            setAttendanceRegisterSubmitted(false);
+            setActiveTab('attendance');
           }}
         />
       )}

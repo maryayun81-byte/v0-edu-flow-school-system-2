@@ -5,6 +5,7 @@ import React from "react"
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 const supabase = createClient();
 
@@ -40,7 +41,7 @@ export default function AdminDashboardLayout({
     // Subscribe to auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
+    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session: Session | null) => {
       if (!session && event !== 'INITIAL_SESSION') {
         router.push('/admin/login');
       }

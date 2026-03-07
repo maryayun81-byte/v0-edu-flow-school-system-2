@@ -4,16 +4,13 @@ import React from "react";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { GraduationCap, Lock, Eye, EyeOff, ArrowLeft, Loader2, Sparkles, Award as IdCard, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 export default function StudentLogin() {
   const router = useRouter();
@@ -29,51 +26,43 @@ export default function StudentLogin() {
     setError("");
 
     try {
-      let authEmail = identifier;
+      let authEmail = identifier.trim();
       
       // Check if identifier is an admission number (ADM-YYYY-XXXX format) or username
-      const isAdmissionNumber = /^ADM-\d{4}-\d{4}$/i.test(identifier);
-      const isEmail = identifier.includes("@");
+      const isAdmissionNumber = /^ADM-\d{4}-\d{4}$/i.test(authEmail);
+      const isEmail = authEmail.includes("@");
       const isUsername = !isAdmissionNumber && !isEmail;
 
       if (isAdmissionNumber || isUsername) {
-        // Look up the user's email from their profile
-        let query = supabase.from("profiles").select("id, email, admission_number, username, full_name");
-        
-        if (isAdmissionNumber) {
-          query = query.eq("admission_number", identifier.toUpperCase());
-        } else {
-          query = query.eq("username", identifier.toLowerCase());
-        }
+        // Use SECURITY DEFINER RPC function — bypasses RLS safely.
+        // The function only returns the email for the given identifier.
+        // A direct profiles table query would fail here because the user isn't
+        // authenticated yet and RLS blocks anonymous queries.
+        const lookupType = isAdmissionNumber ? 'admission_number' : 'username';
+        const cleanIdentifier = isUsername && authEmail.startsWith("@") 
+          ? authEmail.slice(1) 
+          : authEmail;
 
-        const { data: profileData, error: lookupError } = await query.single();
+        const { data: rpcData, error: rpcError } = await supabase
+          .rpc('get_email_by_identifier', {
+            p_identifier: cleanIdentifier,
+            p_type: lookupType,
+          });
 
-        console.log("Profile lookup:", {
-          identifier,
-          isAdmissionNumber,
-          isUsername,
-          profileData,
-          lookupError
-        });
+        console.log("RPC lookup:", { cleanIdentifier, lookupType, rpcData, rpcError });
 
-        if (lookupError || !profileData) {
-          console.error("Profile lookup failed:", lookupError);
-          setError(isAdmissionNumber 
-            ? "No account found with this admission number. Please check and try again." 
-            : "No account found with this username. Please check and try again.");
+        if (rpcError || !rpcData || rpcData.length === 0) {
+          setError(
+            isAdmissionNumber
+              ? "No account found with this admission number. If you registered with an email, please use that instead."
+              : "No account found with this username. Try using your email address instead, or check for typos."
+          );
           setLoading(false);
           return;
         }
 
-        // Use the stored email or construct the placeholder email for auth
-        if (profileData.email) {
-          authEmail = profileData.email;
-        } else {
-          // Use placeholder email format for students without email
-          authEmail = `${profileData.admission_number.toLowerCase().replace(/-/g, "")}@student.eduflow.local`;
-        }
-        
-        console.log("Using auth email:", authEmail);
+        authEmail = rpcData[0].email;
+        console.log("Resolved auth email:", authEmail);
       }
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -83,7 +72,7 @@ export default function StudentLogin() {
 
       if (authError) {
         if (authError.message.includes("Invalid login credentials")) {
-          setError("Invalid credentials. Please check your admission number/username and password.");
+          setError("Invalid credentials. Please check your details and try again.");
         } else {
           setError(authError.message);
         }
@@ -97,7 +86,7 @@ export default function StudentLogin() {
           .from("profiles")
           .select("role, profile_completed, theme")
           .eq("id", authData.user.id)
-          .single();
+          .maybeSingle();
 
         if (profile?.role !== "student") {
           setError("This portal is for students only. Please use the teacher or admin portal.");

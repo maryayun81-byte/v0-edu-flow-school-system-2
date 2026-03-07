@@ -50,18 +50,22 @@ self.addEventListener('fetch', (event) => {
   // Skip chrome-extension and other non-http(s) requests
   if (!event.request.url.startsWith('http')) return;
 
+  // Skip Supabase API requests - never cache auth/db calls
+  if (event.request.url.includes('supabase.co')) return;
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       // Return cached response if found
       if (cachedResponse) {
         // Update cache in background (stale-while-revalidate)
+        // .catch() prevents unhandled promise rejection when offline
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse.clone());
             });
           }
-        });
+        }).catch(() => { /* offline - ignore background update failure */ });
         return cachedResponse;
       }
 

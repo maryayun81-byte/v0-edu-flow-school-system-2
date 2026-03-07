@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import {
   GraduationCap,
   FileText,
@@ -47,12 +47,10 @@ import StudentResults from "@/components/StudentResults";
 import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
 import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
+import StudentAttendanceSummary from "@/components/student/StudentAttendanceSummary";
 
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface StudentProfile {
   id: string;
@@ -120,6 +118,21 @@ const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"
 export default function StudentDashboard() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  useEffect(() => {
+    async function init() {
+      try {
+        const { data: { user: authUser }, error } = await supabase.auth.getUser();
+        if (error || !authUser) {
+          router.replace('/student/login');
+          return;
+        }
+      } catch (err) {
+        console.error("Dashboard init error:", err);
+        router.replace('/student/login');
+      }
+    }
+    init();
+  }, [router]);
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<StudentProfile | null>(null);
   const [notes, setNotes] = useState<Note[]>([]);
@@ -135,7 +148,7 @@ export default function StudentDashboard() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsList, setNotificationsList] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications"
+    "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications" | "attendance"
   >((searchParams?.get("tab") as any) || "overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [transcripts, setTranscripts] = useState<any[]>([]);
@@ -239,7 +252,7 @@ export default function StudentDashboard() {
     if (notifs) {
       // Filter client-side for audience logic that RLS might cover but we want to be explicit
       // Note: RLS already handles the main security. This is for visual processing if needed.
-      const processedInfos = notifs.map(n => ({
+      const processedInfos = notifs.map((n: any) => ({
         ...n,
         is_read: n.read_status.length > 0
       }));
@@ -307,7 +320,6 @@ export default function StudentDashboard() {
     ]);
 
     if (notesRes.data) setNotes(notesRes.data);
-    if (notesRes.data) setNotes(notesRes.data);
     
     // Process assignments to check for submissions
     if (assignmentsRes.data) {
@@ -320,7 +332,7 @@ export default function StudentDashboard() {
             .select('assignment_id')
             .eq('student_id', currentProfile.id);
         
-        const submittedIds = new Set(subs?.map(s => s.assignment_id) || []);
+        const submittedIds = new Set(subs?.map((s: any) => s.assignment_id) || []);
         
         const processedAssignments = assignmentsRes.data.map((a: any) => ({
             ...a,
@@ -359,7 +371,7 @@ export default function StudentDashboard() {
 
         if (sessionsData && sessionsData.length > 0) {
           // Transform to match old timetable structure
-          const transformedData = sessionsData.map(session => ({
+          const transformedData = sessionsData.map((session: any) => ({
             id: session.id,
             title: session.subject,
             day_of_week: session.day_of_week,
@@ -384,7 +396,7 @@ export default function StudentDashboard() {
     
     if (quizzesRes.data) {
       const quizzesWithCount = await Promise.all(
-        quizzesRes.data.map(async (quiz) => {
+        quizzesRes.data.map(async (quiz: any) => {
           const { count, error } = await supabase
             .from("quiz_questions")
             .select("*", { count: "exact", head: true })
@@ -559,6 +571,7 @@ export default function StudentDashboard() {
             { id: "notes", label: "Notes", icon: FileText },
             { id: "assignments", label: "Assignments", icon: Target },
             { id: "timetable", label: "Schedule", icon: Calendar },
+            { id: "attendance", label: "Attendance", icon: BookOpen },
             { id: "quizzes", label: "Quizzes", icon: Brain },
             { id: "results", label: "Results", icon: Trophy },
             { id: "leaderboard", label: "Rankings", icon: Trophy },
@@ -654,6 +667,7 @@ export default function StudentDashboard() {
                   {[
                     { id: "notes", label: "Notes", icon: FileText },
                     { id: "assignments", label: "Assignments", icon: Target },
+                    { id: "attendance", label: "Attendance", icon: BookOpen },
                     { id: "quizzes", label: "Quizzes", icon: Brain },
                     { id: "results", label: "Results", icon: Trophy },
                     { id: "notifications", label: "Alerts", icon: Bell },
@@ -711,6 +725,9 @@ export default function StudentDashboard() {
 
             {/* Upcoming Exams Section */}
             {profile && <StudentUpcomingExams studentClassName={profile.form_class} />}
+
+            {/* Attendance Summary — shown if student has attendance data */}
+            {profile && <StudentAttendanceSummary studentId={profile.id} />}
 
             {/* Content Grid: Calendar + Stats */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -814,6 +831,13 @@ export default function StudentDashboard() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* Attendance Tab */}
+        {activeTab === "attendance" && profile && (
+          <div className="space-y-4">
+            <StudentAttendanceSummary studentId={profile.id} />
           </div>
         )}
 
