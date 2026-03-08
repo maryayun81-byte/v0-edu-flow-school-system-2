@@ -8,6 +8,8 @@ import {
   FileDown, FileText, Loader2, Zap, Activity, Target,
   ChevronRight, Eye, RefreshCw, Brain, Calendar, DollarSign
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
 import {
   AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid,
   Tooltip, ResponsiveContainer, Cell, RadialBarChart, RadialBar
@@ -185,6 +187,19 @@ export default function FinanceReports({ payments, events, students }: Props) {
           <div className="flex items-center gap-2 mb-3 px-1">
             <Brain className="w-4 h-4 text-indigo-500" />
             <h3 className="text-sm font-bold text-foreground uppercase tracking-widest">Report Intelligence Engine</h3>
+          </div>
+
+          <div className="mb-6 p-4 bg-primary/10 border border-primary/20 rounded-2xl">
+            <h4 className="text-xs font-bold text-primary uppercase mb-2">Autonomous Archive</h4>
+            <p className="text-[10px] text-muted-foreground mb-3 leading-relaxed">
+              Every completed tuition event automatically generates a premium financial discharge report.
+            </p>
+            <Button variant="default" size="sm" className="w-full gap-2 h-9 text-xs" asChild>
+              <Link href="/admin/reports">
+                <FileText className="w-3.5 h-3.5" />
+                Access Reports Archive
+              </Link>
+            </Button>
           </div>
 
           {REPORTS.map(r => {

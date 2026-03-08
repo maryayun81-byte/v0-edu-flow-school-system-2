@@ -487,9 +487,11 @@ export class CognitiveCore {
 
     // 8. Persist to database
     try {
+      const isUUID = studentId && studentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+      
       await supabase.from('intelligence_insights').upsert({
-        entity_type: 'student',
-        entity_id: studentId,
+        entity_type: isUUID ? 'student' : 'platform',
+        entity_id: isUUID ? studentId : null,
         insight_text: narrative,
         insight_type: domain,
         confidence,
@@ -512,12 +514,20 @@ export class CognitiveCore {
   ): Promise<{ insight_text: string; type: InsightDomain; confidence: number }[]> {
 
     // 1. Try reading precomputed insights first (performance architecture)
-    const { data: cached } = await supabase
+    const isUUID = entityId && entityId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+    
+    let query = supabase
       .from('intelligence_insights')
       .select('insight_text, insight_type, confidence, created_at')
-      .eq('entity_id', entityId)
-      .eq('entity_type', dashboardCtx === 'student' ? 'student' : 'platform')
-      .in('insight_type', domains)
+      .in('insight_type', domains);
+
+    if (isUUID) {
+      query = query.eq('entity_id', entityId).eq('entity_type', 'student');
+    } else {
+      query = query.is('entity_id', null).eq('entity_type', 'platform');
+    }
+
+    const { data: cached } = await query
       .order('created_at', { ascending: false })
       .limit(domains.length);
 
@@ -634,15 +644,22 @@ export class CognitiveCore {
    * Fetches real behavioural signals from Supabase for a specific student.
    */
   static async fetchStudentSignals(studentId: string): Promise<BehavioralSignals> {
+    const isUUID = studentId && studentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+
     try {
       const now = Date.now();
       const cutoff14 = new Date(now - 14 * 86400000).toISOString();
       const cutoff28 = new Date(now - 28 * 86400000).toISOString();
 
-      const { data: attendance } = await supabase
+      let attQuery = supabase
         .from('attendance')
-        .select('status, created_at')
-        .eq('student_id', studentId);
+        .select('status, created_at');
+
+      if (isUUID) {
+        attQuery = attQuery.eq('student_id', studentId);
+      }
+      
+      const { data: attendance } = await attQuery;
 
       const all  = attendance || [];
       const attTotal   = all.length;
@@ -656,10 +673,15 @@ export class CognitiveCore {
       const p14Pct     = prev14.length   > 0 ? prev14.filter((r: any)   => r.status === 'present').length / prev14.length   : attRate;
       const recentDelta = r14Pct - p14Pct;
 
-      const { data: payments } = await supabase
+      let payQuery = supabase
         .from('ppt_payments')
-        .select('status')
-        .eq('student_id', studentId);
+        .select('status');
+      
+      if (isUUID) {
+        payQuery = payQuery.eq('student_id', studentId);
+      }
+
+      const { data: payments } = await payQuery;
 
       const payTotal = payments?.length || 0;
       const payPaid  = payments?.filter((r: any) => r.status === 'paid').length || 0;

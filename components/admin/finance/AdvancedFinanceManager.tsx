@@ -12,8 +12,11 @@ import {
   BarChart2, 
   FileDown, 
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  Archive
 } from "lucide-react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 import FinanceOverview from "./FinanceOverview";
 import RecordPayment from "./RecordPayment";
@@ -37,6 +40,7 @@ const TABS = [
   { id: "events",    label: "Event Finance",      icon: CalendarDays },
   { id: "analytics", label: "Analytics",         icon: BarChart2 },
   { id: "reports",   label: "Reports & Exports", icon: FileDown },
+  { id: "archive",   label: "Archive",          icon: Archive },
   { id: "governance", label: "AI Governance",    icon: ShieldCheck },
 ];
 
@@ -129,6 +133,24 @@ export default function AdvancedFinanceManager({ adminId }: { adminId: string })
           {activeTab === "events"    && <EventFinance payments={payments} events={events} students={students} />}
           {activeTab === "analytics" && <FinanceAnalytics payments={payments} events={events} />}
           {activeTab === "reports"   && <FinanceReports payments={payments} events={events} students={students} />}
+          {activeTab === "archive"   && (
+            <div className="bg-card/50 backdrop-blur-xl border border-border/50 rounded-3xl p-12 text-center animate-in fade-in zoom-in duration-500">
+              <div className="w-20 h-20 bg-primary/10 rounded-3xl flex items-center justify-center mx-auto mb-6">
+                <Archive className="w-10 h-10 text-primary" />
+              </div>
+              <h3 className="text-2xl font-bold text-foreground mb-2">Autonomous Reports Archive</h3>
+              <p className="text-muted-foreground max-w-md mx-auto mb-8">
+                The financial reporting engine automatically captures event completion data and archives them for 
+                compliance and executive review.
+              </p>
+              <Button asChild size="lg" className="rounded-2xl h-14 px-8 text-base">
+                <Link href="/admin/reports" className="flex items-center gap-2">
+                  Open Reports Vault
+                  <FileDown className="w-5 h-5" />
+                </Link>
+              </Button>
+            </div>
+          )}
           {activeTab === "governance" && <FinanceGovernancePanel />}
         </>
       )}

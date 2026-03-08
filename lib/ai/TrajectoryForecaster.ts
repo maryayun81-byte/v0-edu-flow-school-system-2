@@ -29,6 +29,11 @@ export class TrajectoryForecaster {
    * Records a point-in-time snapshot of student signals for sequence modelling.
    */
   static async recordTrajectory(studentId: string, signals: BehavioralSignals, successScore: number) {
+    // Skip if not a valid UUID (e.g. "admin-global", "anonymous")
+    if (!studentId || !studentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return;
+    }
+
     try {
       const { error } = await supabase
         .from('behavioral_trajectories')
@@ -41,6 +46,8 @@ export class TrajectoryForecaster {
           engagement_velocity: signals.engagementVelocity,
           academic_performance_trend: signals.academicPerformanceTrend,
           signals_json: signals
+        }, {
+          onConflict: 'student_id,snapshot_date'
         });
 
       if (error) throw error;
@@ -61,6 +68,11 @@ export class TrajectoryForecaster {
       academicSlope: 0,
       forecastedSuccess: 0.5
     };
+
+    // Skip if not a valid UUID
+    if (!studentId || !studentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      return defaultMetrics;
+    }
 
     try {
       const { data: snapshots, error } = await supabase

@@ -68,6 +68,8 @@ export class OutcomeReinforcer {
           weight: Math.min(1, Math.max(0, newWeight)),
           effectiveness_score: totalImpact,
           last_updated: new Date().toISOString()
+        }, {
+          onConflict: 'domain,intervention_type'
         });
 
       // 3. Mark outcome as verified
