@@ -20,7 +20,12 @@ import {
   Users,
   ClipboardX,
   BarChart3,
+  Sparkles,
+  Loader2,
+  RefreshCcw,
+  Zap,
 } from "lucide-react";
+import { toast } from "sonner";
 
 const supabase = createClient();
 
@@ -54,6 +59,7 @@ interface TuitionEvent {
   id: string;
   name: string;
   attendance_threshold: number;
+  attendance_eval_days: number;
 }
 
 export default function AttendanceAnalytics() {
@@ -67,6 +73,9 @@ export default function AttendanceAnalytics() {
   const [dailyTrend, setDailyTrend] = useState<DailyTrend[]>([]);
   const [lowStudents, setLowStudents] = useState<LowAttendanceStudent[]>([]);
   const [missedAlerts, setMissedAlerts] = useState<MissedAlert[]>([]);
+  
+  const [aiInsight, setAiInsight] = useState<string>("");
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
 
   useEffect(() => {
     fetchEvents();
@@ -80,7 +89,7 @@ export default function AttendanceAnalytics() {
   async function fetchEvents() {
     const { data } = await supabase
       .from("tuition_events")
-      .select("id, name, attendance_threshold")
+      .select("id, name, attendance_threshold, attendance_eval_days")
       .order("start_date", { ascending: false });
     setEvents(data || []);
     if (data && data.length > 0) setSelectedEventId(data[0].id);
@@ -143,13 +152,71 @@ export default function AttendanceAnalytics() {
           class_name: r.classes?.name || "Unknown",
           attendance_percentage: Number(r.attendance_percentage),
         }))
-        .sort((a, b) => a.attendance_percentage - b.attendance_percentage);
+        .sort((a: LowAttendanceStudent, b: LowAttendanceStudent) => a.attendance_percentage - b.attendance_percentage);
       setLowStudents(low);
     } else {
-      setAvgAttendance(0);
-      setBelowThresholdCount(0);
-      setClassBars([]);
-      setLowStudents([]);
+      // FALLBACK: Compute from raw attendance if eligibility records aren't generated
+      const { data: rawAttendance } = await supabase
+        .from("attendance")
+        .select(`
+          student_id, status,
+          profiles!attendance_student_id_fkey(full_name, admission_number, form_class)
+        `)
+        .eq("event_id", eventId);
+
+      if (rawAttendance && rawAttendance.length > 0) {
+        // We need to fetch class names separately or compute them if class_teachers/classes are linked
+        // For simplicity, we'll try to group by profiles.form_class (which might be the class name or ID)
+        const studentMap: Record<string, { present: number; total: number; name: string; admission: string; class: string }> = {};
+        rawAttendance.forEach((r: any) => {
+          const sid = r.student_id;
+          if (!studentMap[sid]) {
+            studentMap[sid] = { 
+              present: 0, 
+              total: event?.attendance_eval_days || 15, // Use event's eval days or fallback
+              name: r.profiles?.full_name || "Unknown",
+              admission: r.profiles?.admission_number || "",
+              class: r.profiles?.form_class || "General"
+            };
+          }
+          if (r.status === "present" || r.status === "late") studentMap[sid].present++;
+        });
+
+        const studentStats = Object.values(studentMap).map(s => ({
+          ...s,
+          pct: (s.present / s.total) * 100
+        }));
+
+        setAvgAttendance(Math.round(studentStats.reduce((a, b) => a + b.pct, 0) / studentStats.length * 10) / 10);
+        setBelowThresholdCount(studentStats.filter(s => s.pct < threshold).length);
+
+        const classMap: Record<string, { total: number; sum: number }> = {};
+        studentStats.forEach(s => {
+          if (!classMap[s.class]) classMap[s.class] = { total: 0, sum: 0 };
+          classMap[s.class].total++;
+          classMap[s.class].sum += s.pct;
+        });
+
+        setClassBars(Object.entries(classMap).map(([class_name, v]) => ({
+          class_name,
+          average_pct: Math.round((v.sum / v.total) * 10) / 10,
+          total_students: v.total,
+        })));
+
+        setLowStudents(studentStats
+          .filter(s => s.pct < threshold)
+          .map(s => ({
+            student_name: s.name,
+            admission_number: s.admission,
+            class_name: s.class,
+            attendance_percentage: s.pct
+          })));
+      } else {
+        setAvgAttendance(0);
+        setBelowThresholdCount(0);
+        setClassBars([]);
+        setLowStudents([]);
+      }
     }
 
     // Daily attendance trend (from attendance table)
@@ -180,22 +247,116 @@ export default function AttendanceAnalytics() {
     setLoading(false);
   }
 
+  async function generateAiInsights() {
+    if (classBars.length === 0) return;
+    
+    setIsGeneratingAi(true);
+    setAiInsight("");
+    
+    try {
+      const response = await fetch("/api/ai/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "admin-attendance",
+          data: {
+            avgAttendance,
+            belowThresholdCount,
+            classBars,
+            dailyTrend,
+            threshold: event?.attendance_threshold || 80
+          },
+          context: {
+            eventId: selectedEventId
+          }
+        })
+      });
+
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      setAiInsight(result.insight);
+      toast.success("Strategic insights generated!");
+    } catch (error: any) {
+      console.error("AI Insight Error:", error);
+      toast.error(error.message || "Failed to generate AI insights");
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  }
+
   const event = events.find(e => e.id === selectedEventId);
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div>
-          <h2 className="text-xl font-bold text-foreground">Attendance Analytics</h2>
-          <p className="text-sm text-muted-foreground">Overview of attendance performance across events and classes</p>
+          <h2 className="text-2xl font-black text-foreground tracking-tight">ATTENDANCE COMMAND CENTRE</h2>
+          <p className="text-xs text-muted-foreground font-bold uppercase tracking-[0.2em] opacity-60">High-Level Organizational Performance & Alerts</p>
         </div>
-        <select
-          value={selectedEventId}
-          onChange={e => setSelectedEventId(e.target.value)}
-          className="bg-muted border border-border/50 rounded-xl px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-        >
-          {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
-        </select>
+        <div className="flex items-center gap-3">
+           <select
+            value={selectedEventId}
+            onChange={e => setSelectedEventId(e.target.value)}
+            className="bg-card border border-border/50 rounded-xl px-4 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all shadow-sm"
+          >
+            {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+          </select>
+          <button 
+            onClick={() => selectedEventId && loadAnalytics(selectedEventId)}
+            className="p-2.5 bg-muted/50 hover:bg-muted border border-border/50 rounded-xl transition-all"
+          >
+            <RefreshCcw className="w-4 h-4 text-muted-foreground" />
+          </button>
+        </div>
+      </div>
+
+      {/* Strategic AI Advisor Card */}
+      <div className="relative group overflow-hidden rounded-[2rem] border border-primary/20 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-primary/20 transition-all duration-700" />
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shadow-lg shadow-primary/10">
+                <Sparkles className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-black text-foreground text-sm uppercase tracking-wider">Strategic Attendance Advisor</h4>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.2em] opacity-60">AI-Powered Organizational Insight</p>
+              </div>
+            </div>
+            <button
+              onClick={generateAiInsights}
+              disabled={isGeneratingAi}
+              className="px-6 py-2.5 bg-slate-900 border border-border/50 hover:border-primary/50 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 flex items-center gap-2 shadow-xl"
+            >
+              {isGeneratingAi ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Analyzing Organizational Data...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  Generate Strategic Insight
+                </>
+              )}
+            </button>
+          </div>
+          
+          {aiInsight ? (
+            <div className="bg-card/30 backdrop-blur-sm rounded-2xl p-6 border border-primary/10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+               <div className="prose prose-sm prose-invert max-w-none">
+                <div dangerouslySetInnerHTML={{ __html: aiInsight.replace(/\n/g, '<br/>') }} className="text-slate-300 leading-relaxed font-medium italic" />
+              </div>
+            </div>
+          ) : (
+            <div className="bg-background/40 border border-dashed border-border/50 rounded-2xl py-8 px-6 text-center">
+              <p className="text-xs text-muted-foreground font-medium max-w-sm mx-auto">
+                Select an event and click the button above to receive a deep-dive analysis of your school's attendance patterns and strategic recommendations.
+              </p>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* Missed Alerts */}

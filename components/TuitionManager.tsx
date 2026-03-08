@@ -1,28 +1,11 @@
 "use client";
 
-import React from "react"
-
+import React from "react";
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -35,43 +18,53 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
   DollarSign,
-  Plus,
-  Download,
   CheckCircle,
   Clock,
   AlertTriangle,
-  XCircle,
-  Receipt,
-  TrendingUp,
-  Users,
-  Calendar,
+  Receipt as ReceiptIcon,
   Search,
+  Download,
+  Eye,
+  X,
   FileText,
-  CreditCard,
+  Filter,
 } from "lucide-react";
-import { format, parseISO, isAfter } from "date-fns";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
+import PremiumReceiptTemplate from "./finance/PremiumReceiptTemplate";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Payment {
   id: string;
   student_id: string;
   student_name: string;
-  student_admission_number: string;
+  student_admission: string;
+  event_name: string | null;
   amount: number;
-  payment_type: "tuition" | "exam_fee" | "library" | "transport" | "other";
-  payment_method: "cash" | "bank_transfer" | "mpesa" | "card" | "other";
-  term: string;
-  academic_year: string;
-  due_date: string;
-  paid_date: string | null;
-  status: "pending" | "partial" | "paid" | "overdue";
+  payment_type: string;
+  payment_method: string;
+  payment_date: string;
+  status: "paid" | "pending" | "partial" | "refunded";
   transaction_ref: string | null;
-  notes: string | null;
-  created_by: string;
+  receipt_number: string | null;
+  created_at: string;
+}
+
+interface Receipt {
+  id: string;
+  receipt_number: string;
+  student_id: string;
+  student_name: string;
+  event_name: string | null;
+  amount: number;
+  payment_method: string;
+  transaction_ref: string | null;
+  payment_date: string;
+  remaining_balance: number;
+  status: string;
+  published_at: string | null;
   created_at: string;
 }
 
@@ -81,606 +74,409 @@ interface TuitionManagerProps {
   studentAdmissionNumber?: string;
 }
 
-const paymentTypeLabels = {
-  tuition: "Tuition Fee",
-  exam_fee: "Exam Fee",
-  library: "Library Fee",
-  transport: "Transport Fee",
+const paymentTypeLabels: Record<string, string> = {
+  tuition_fee: "Tuition Fee",
+  deposit: "Deposit",
+  balance_payment: "Balance Payment",
+  materials: "Materials",
   other: "Other",
 };
 
 const statusConfig = {
+  paid: { icon: CheckCircle, color: "bg-green-500/20 text-green-400 border-green-500/30", label: "Paid" },
   pending: { icon: Clock, color: "bg-amber-500/20 text-amber-400 border-amber-500/30", label: "Pending" },
   partial: { icon: AlertTriangle, color: "bg-blue-500/20 text-blue-400 border-blue-500/30", label: "Partial" },
-  paid: { icon: CheckCircle, color: "bg-green-500/20 text-green-400 border-green-500/30", label: "Paid" },
-  overdue: { icon: XCircle, color: "bg-red-500/20 text-red-400 border-red-500/30", label: "Overdue" },
+  refunded: { icon: X, color: "bg-red-500/20 text-red-400 border-red-500/30", label: "Refunded" },
 };
 
 export default function TuitionManager({ userRole, userId, studentAdmissionNumber }: TuitionManagerProps) {
+  const [activeTab, setActiveTab] = useState<"payments" | "receipts">("payments");
   const [payments, setPayments] = useState<Payment[]>([]);
+  const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [loading, setLoading] = useState(true);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [students, setStudents] = useState<{ id: string; full_name: string; admission_number: string }[]>([]);
-
-  const [formData, setFormData] = useState({
-    student_id: "",
-    student_name: "",
-    student_admission_number: "",
-    amount: "",
-    payment_type: "tuition" as Payment["payment_type"],
-    payment_method: "bank_transfer" as Payment["payment_method"],
-    term: "Term 1",
-    academic_year: new Date().getFullYear().toString(),
-    due_date: "",
-    paid_date: "",
-    status: "pending" as Payment["status"],
-    transaction_ref: "",
-    notes: "",
-  });
+  const [eventFilter, setEventFilter] = useState("all");
+  const [preview, setPreview] = useState<Receipt | null>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
 
   const isAdmin = userRole === "admin";
 
   useEffect(() => {
-    fetchPayments();
-    if (isAdmin) {
-      fetchStudents();
-    }
-  }, [statusFilter, typeFilter]);
+    fetchData();
+  }, [userId]);
 
-  async function fetchStudents() {
-    try {
-      const { data } = await supabase
-        .from("profiles")
-        .select("id, full_name, admission_number")
-        .eq("role", "student")
-        .order("full_name");
-
-      setStudents(data || []);
-    } catch (error) {
-      console.error("Error fetching students:", error);
-    }
-  }
-
-  async function fetchPayments() {
+  async function fetchData() {
     setLoading(true);
     try {
-      let query = supabase
-        .from("tuition_payments")
+      const { data: paymentsData, error: paymentsError } = await supabase
+        .from("ppt_payments")
         .select("*")
-        .order("created_at", { ascending: false });
+        .eq("student_id", userId)
+        .order("payment_date", { ascending: false });
 
-      if (userRole === "student" && studentAdmissionNumber) {
-        query = query.eq("student_admission_number", studentAdmissionNumber);
-      }
+      if (paymentsError) throw paymentsError;
+      setPayments(paymentsData || []);
 
-      if (statusFilter !== "all") {
-        query = query.eq("status", statusFilter);
-      }
+      const { data: receiptsData, error: receiptsError } = await supabase
+        .from("ppt_receipts")
+        .select("*")
+        .eq("student_id", userId)
+        .eq("status", "published")
+        .order("published_at", { ascending: false });
 
-      if (typeFilter !== "all") {
-        query = query.eq("payment_type", typeFilter);
-      }
-
-      const { data, error } = await query;
-
-      if (error) throw error;
-
-      // Update overdue status
-      const updatedPayments = (data || []).map((payment) => {
-        if (payment.status === "pending" && payment.due_date && isAfter(new Date(), parseISO(payment.due_date))) {
-          return { ...payment, status: "overdue" };
-        }
-        return payment;
-      });
-
-      setPayments(updatedPayments);
+      if (receiptsError) throw receiptsError;
+      setReceipts(receiptsData || []);
     } catch (error) {
-      console.error("Error fetching payments:", error);
+      console.error("Error fetching finance data:", error);
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-
-    const selectedStudent = students.find((s) => s.id === formData.student_id);
-
-    const paymentData = {
-      student_id: formData.student_id,
-      student_name: selectedStudent?.full_name || formData.student_name,
-      student_admission_number: selectedStudent?.admission_number || formData.student_admission_number,
-      amount: parseFloat(formData.amount),
-      payment_type: formData.payment_type,
-      payment_method: formData.payment_method,
-      term: formData.term,
-      academic_year: formData.academic_year,
-      due_date: formData.due_date,
-      paid_date: formData.paid_date || null,
-      status: formData.status,
-      transaction_ref: formData.transaction_ref || null,
-      notes: formData.notes || null,
-      created_by: userId,
-    };
-
+  async function downloadPDF(r: Receipt) {
+    setIsGenerating(true);
     try {
-      const { error } = await supabase.from("tuition_payments").insert(paymentData);
+      const element = document.getElementById("premium-receipt-capture");
+      if (!element) return;
 
-      if (error) throw error;
+      // Ensure element is visible for capture but not to user
+      element.style.display = "block";
+      element.style.position = "absolute";
+      element.style.left = "-9999px";
 
-      // Create notification for student
-      if (formData.student_id) {
-        await supabase.from("notifications").insert({
-          type: "general",
-          title: "New Payment Record",
-          message: `A ${paymentTypeLabels[formData.payment_type]} of KES ${parseFloat(formData.amount).toLocaleString()} has been recorded.`,
-          created_by: userId,
-        });
-      }
+      const canvas = await html2canvas(element, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: "#ffffff"
+      });
+      
+      const imgData = canvas.toDataURL("image/png");
+      const pdf = new jsPDF({
+        orientation: "portrait",
+        unit: "pt",
+        format: "a4"
+      });
 
-      resetForm();
-      setIsDialogOpen(false);
-      fetchPayments();
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+      pdf.save(`${r.receipt_number}.pdf`);
+      
+      element.style.display = "none";
     } catch (error) {
-      console.error("Error saving payment:", error);
+      console.error("PDF Generation Error:", error);
+    } finally {
+      setIsGenerating(false);
     }
   }
 
-  async function handleStatusUpdate(paymentId: string, newStatus: Payment["status"], paidDate?: string) {
-    try {
-      const updateData: Partial<Payment> = { status: newStatus };
-      if (newStatus === "paid" && paidDate) {
-        updateData.paid_date = paidDate;
-      }
-
-      const { error } = await supabase
-        .from("tuition_payments")
-        .update(updateData)
-        .eq("id", paymentId);
-
-      if (error) throw error;
-      fetchPayments();
-    } catch (error) {
-      console.error("Error updating status:", error);
-    }
-  }
-
-  function resetForm() {
-    setFormData({
-      student_id: "",
-      student_name: "",
-      student_admission_number: "",
-      amount: "",
-      payment_type: "tuition",
-      payment_method: "bank_transfer",
-      term: "Term 1",
-      academic_year: new Date().getFullYear().toString(),
-      due_date: "",
-      paid_date: "",
-      status: "pending",
-      transaction_ref: "",
-      notes: "",
-    });
-  }
+  // Get unique event names for filter
+  const uniqueEvents = Array.from(new Set(payments.map(p => p.event_name).filter(Boolean)));
 
   // Calculate summary stats
   const totalAmount = payments.reduce((sum, p) => sum + p.amount, 0);
   const paidAmount = payments.filter((p) => p.status === "paid").reduce((sum, p) => sum + p.amount, 0);
   const pendingAmount = payments.filter((p) => p.status === "pending" || p.status === "partial").reduce((sum, p) => sum + p.amount, 0);
-  const overdueAmount = payments.filter((p) => p.status === "overdue").reduce((sum, p) => sum + p.amount, 0);
   const collectionRate = totalAmount > 0 ? (paidAmount / totalAmount) * 100 : 0;
 
-  const filteredPayments = payments.filter((payment) =>
-    searchQuery === "" ||
-    payment.student_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    payment.student_admission_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    payment.transaction_ref?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredPayments = payments.filter((p) => {
+    const matchesSearch = searchQuery === "" ||
+      (p.event_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.transaction_ref || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.receipt_number || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesEvent = eventFilter === "all" || p.event_name === eventFilter;
+    return matchesSearch && matchesEvent;
+  });
+
+  const filteredReceipts = receipts.filter((r) => {
+    const matchesSearch = searchQuery === "" ||
+      r.receipt_number.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.event_name || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.transaction_ref || "").toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesEvent = eventFilter === "all" || r.event_name === eventFilter;
+    return matchesSearch && matchesEvent;
+  });
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-foreground">
-            {isAdmin ? "Financial Management" : "My Payments"}
-          </h2>
-          <p className="text-muted-foreground">
-            {isAdmin ? "Track tuition and fee payments" : "View your payment history and dues"}
-          </p>
+          <h2 className="text-2xl font-bold text-foreground">Fees & Finance</h2>
+          <p className="text-muted-foreground text-sm">View your payment history and official receipts</p>
         </div>
-
-        {isAdmin && (
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="bg-primary hover:bg-primary/90">
-                <Plus className="h-4 w-4 mr-2" />
-                Add Payment
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto bg-card border-border">
-              <DialogHeader>
-                <DialogTitle>Record New Payment</DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label htmlFor="student">Student</Label>
-                  <Select
-                    value={formData.student_id}
-                    onValueChange={(value) => setFormData({ ...formData, student_id: value })}
-                  >
-                    <SelectTrigger className="bg-background/50">
-                      <SelectValue placeholder="Select student" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {students.map((student) => (
-                        <SelectItem key={student.id} value={student.id}>
-                          {student.full_name} ({student.admission_number})
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="amount">Amount (KES)</Label>
-                    <Input
-                      id="amount"
-                      type="number"
-                      value={formData.amount}
-                      onChange={(e) => setFormData({ ...formData, amount: e.target.value })}
-                      placeholder="50000"
-                      required
-                      className="bg-background/50"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="payment_type">Payment Type</Label>
-                    <Select
-                      value={formData.payment_type}
-                      onValueChange={(value) => setFormData({ ...formData, payment_type: value as Payment["payment_type"] })}
-                    >
-                      <SelectTrigger className="bg-background/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tuition">Tuition Fee</SelectItem>
-                        <SelectItem value="exam_fee">Exam Fee</SelectItem>
-                        <SelectItem value="library">Library Fee</SelectItem>
-                        <SelectItem value="transport">Transport Fee</SelectItem>
-                        <SelectItem value="other">Other</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="term">Term</Label>
-                    <Select
-                      value={formData.term}
-                      onValueChange={(value) => setFormData({ ...formData, term: value })}
-                    >
-                      <SelectTrigger className="bg-background/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Term 1">Term 1</SelectItem>
-                        <SelectItem value="Term 2">Term 2</SelectItem>
-                        <SelectItem value="Term 3">Term 3</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div>
-                    <Label htmlFor="academic_year">Academic Year</Label>
-                    <Input
-                      id="academic_year"
-                      value={formData.academic_year}
-                      onChange={(e) => setFormData({ ...formData, academic_year: e.target.value })}
-                      placeholder="2024"
-                      required
-                      className="bg-background/50"
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="due_date">Due Date</Label>
-                    <Input
-                      id="due_date"
-                      type="date"
-                      value={formData.due_date}
-                      onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
-                      required
-                      className="bg-background/50"
-                    />
-                  </div>
-
-                  <div>
-                    <Label htmlFor="status">Status</Label>
-                    <Select
-                      value={formData.status}
-                      onValueChange={(value) => setFormData({ ...formData, status: value as Payment["status"] })}
-                    >
-                      <SelectTrigger className="bg-background/50">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="pending">Pending</SelectItem>
-                        <SelectItem value="partial">Partial</SelectItem>
-                        <SelectItem value="paid">Paid</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {formData.status === "paid" && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <Label htmlFor="paid_date">Paid Date</Label>
-                      <Input
-                        id="paid_date"
-                        type="date"
-                        value={formData.paid_date}
-                        onChange={(e) => setFormData({ ...formData, paid_date: e.target.value })}
-                        className="bg-background/50"
-                      />
-                    </div>
-
-                    <div>
-                      <Label htmlFor="payment_method">Payment Method</Label>
-                      <Select
-                        value={formData.payment_method}
-                        onValueChange={(value) => setFormData({ ...formData, payment_method: value as Payment["payment_method"] })}
-                      >
-                        <SelectTrigger className="bg-background/50">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="cash">Cash</SelectItem>
-                          <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
-                          <SelectItem value="mpesa">M-Pesa</SelectItem>
-                          <SelectItem value="card">Card</SelectItem>
-                          <SelectItem value="other">Other</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <Label htmlFor="transaction_ref">Transaction Reference</Label>
-                  <Input
-                    id="transaction_ref"
-                    value={formData.transaction_ref}
-                    onChange={(e) => setFormData({ ...formData, transaction_ref: e.target.value })}
-                    placeholder="TXN-12345"
-                    className="bg-background/50"
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    value={formData.notes}
-                    onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Additional notes..."
-                    rows={2}
-                    className="bg-background/50"
-                  />
-                </div>
-
-                <div className="flex gap-2 justify-end">
-                  <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)} className="bg-transparent">
-                    Cancel
-                  </Button>
-                  <Button type="submit" className="bg-primary">
-                    Add Payment
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
-        )}
       </div>
 
       {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card className="bg-card/50 border-border">
+      <div className="grid gap-4 md:grid-cols-3">
+        <Card className="bg-card/50 border-border overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {isAdmin ? "Total Expected" : "Total Fees"}
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Invoiced</CardTitle>
+            <DollarSign className="h-4 w-4 text-primary" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">KES {totalAmount.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {payments.length} payment records
-            </p>
+            <div className="text-2xl font-bold">KSh {totalAmount.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground mt-1">{payments.length} Records found</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-card/50 border-border">
+        <Card className="bg-card/50 border-border overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {isAdmin ? "Total Collected" : "Paid"}
-            </CardTitle>
-            <CheckCircle className="h-4 w-4 text-green-400" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Total Paid</CardTitle>
+            <CheckCircle className="h-4 w-4 text-emerald-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-400">KES {paidAmount.toLocaleString()}</div>
-            <Progress value={collectionRate} className="mt-2 h-2" />
-            <p className="text-xs text-muted-foreground mt-1">
-              {collectionRate.toFixed(1)}% collection rate
-            </p>
+            <div className="text-2xl font-bold text-emerald-400">KSh {paidAmount.toLocaleString()}</div>
+            <Progress value={collectionRate} className="mt-2 h-1.5" />
+            <p className="text-xs text-muted-foreground mt-1">{collectionRate.toFixed(1)}% Completed</p>
           </CardContent>
         </Card>
 
-        <Card className="bg-card/50 border-border">
+        <Card className="bg-card/50 border-border overflow-hidden">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Pending
-            </CardTitle>
-            <Clock className="h-4 w-4 text-amber-400" />
+            <CardTitle className="text-sm font-medium text-muted-foreground">Outstanding Balance</CardTitle>
+            <Clock className="h-4 w-4 text-blue-400" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-amber-400">KES {pendingAmount.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {payments.filter((p) => p.status === "pending" || p.status === "partial").length} pending payments
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="bg-card/50 border-border">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Overdue
-            </CardTitle>
-            <AlertTriangle className="h-4 w-4 text-red-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-400">KES {overdueAmount.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground mt-1">
-              {payments.filter((p) => p.status === "overdue").length} overdue payments
-            </p>
+            <div className="text-2xl font-bold text-blue-400">KSh {pendingAmount.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground mt-1">Pending clearance</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-4">
+      {/* Internal Tabs */}
+      <div className="flex gap-1 p-1 bg-muted/40 border border-border/50 rounded-xl w-fit">
+        <button
+          onClick={() => setActiveTab("payments")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            activeTab === "payments" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Payment Records
+        </button>
+        <button
+          onClick={() => setActiveTab("receipts")}
+          className={`px-4 py-2 rounded-lg text-sm font-medium transition-all flex items-center gap-2 ${
+            activeTab === "receipts" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          My Receipts
+          {receipts.length > 0 && (
+            <span className="w-5 h-5 bg-primary/20 text-primary text-[10px] rounded-full flex items-center justify-center font-bold">
+              {receipts.length}
+            </span>
+          )}
+        </button>
+      </div>
+
+      {/* Search & Filter */}
+      <div className="flex flex-col md:flex-row gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Search by name, admission number, or reference..."
+            placeholder={`Search ${activeTab}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-10 bg-card/50 border-border"
+            className="pl-10 bg-card/50 border-border h-11"
           />
         </div>
-
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="w-40 bg-card/50 border-border">
-            <SelectValue placeholder="All Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Status</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="partial">Partial</SelectItem>
-            <SelectItem value="paid">Paid</SelectItem>
-            <SelectItem value="overdue">Overdue</SelectItem>
-          </SelectContent>
-        </Select>
-
-        <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-40 bg-card/50 border-border">
-            <SelectValue placeholder="All Types" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Types</SelectItem>
-            <SelectItem value="tuition">Tuition</SelectItem>
-            <SelectItem value="exam_fee">Exam Fee</SelectItem>
-            <SelectItem value="library">Library</SelectItem>
-            <SelectItem value="transport">Transport</SelectItem>
-            <SelectItem value="other">Other</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-2 min-w-[200px]">
+           <Filter className="w-4 h-4 text-muted-foreground" />
+           <Select value={eventFilter} onValueChange={setEventFilter}>
+              <SelectTrigger className="bg-card/50 border-border h-11">
+                <SelectValue placeholder="All Events" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Events</SelectItem>
+                {uniqueEvents.map(e => e && <SelectItem key={e} value={e}>{e}</SelectItem>)}
+              </SelectContent>
+           </Select>
+        </div>
       </div>
 
-      {/* Payments Table */}
-      <Card className="bg-card/50 border-border">
+      {/* Content Area */}
+      <Card className="bg-card/50 border-border overflow-hidden">
         <CardContent className="p-0">
           {loading ? (
-            <div className="p-8 text-center">
+            <div className="p-12 text-center">
               <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto" />
-              <p className="text-muted-foreground mt-2">Loading payments...</p>
+              <p className="text-muted-foreground mt-2">Loading financial records...</p>
             </div>
-          ) : filteredPayments.length === 0 ? (
-            <div className="p-8 text-center">
-              <Receipt className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
-              <h3 className="text-lg font-semibold">No Payments Found</h3>
-              <p className="text-muted-foreground">
-                {isAdmin ? "Add a payment record to get started" : "No payment records yet"}
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="border-border hover:bg-transparent">
-                    <TableHead>Student</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Amount</TableHead>
-                    <TableHead>Term</TableHead>
-                    <TableHead>Due Date</TableHead>
-                    <TableHead>Status</TableHead>
-                    {isAdmin && <TableHead>Actions</TableHead>}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredPayments.map((payment) => {
-                    const StatusIcon = statusConfig[payment.status]?.icon || Clock;
-                    return (
-                      <TableRow key={payment.id} className="border-border">
-                        <TableCell>
-                          <div>
-                            <p className="font-medium">{payment.student_name}</p>
-                            <p className="text-xs text-muted-foreground">{payment.student_admission_number}</p>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className="bg-transparent">
-                            {paymentTypeLabels[payment.payment_type]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="font-medium">
-                          KES {payment.amount.toLocaleString()}
-                        </TableCell>
-                        <TableCell>
-                          {payment.term} {payment.academic_year}
-                        </TableCell>
-                        <TableCell>
-                          {payment.due_date && format(parseISO(payment.due_date), "MMM d, yyyy")}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={statusConfig[payment.status]?.color}>
-                            <StatusIcon className="h-3 w-3 mr-1" />
-                            {statusConfig[payment.status]?.label}
-                          </Badge>
-                        </TableCell>
-                        {isAdmin && (
+          ) : activeTab === "payments" ? (
+            filteredPayments.length === 0 ? (
+              <div className="p-12 text-center">
+                <FileText className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold">No Payments Found</h3>
+                <p className="text-muted-foreground">Your payment history will appear here.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="border-border hover:bg-transparent bg-muted/20">
+                      <TableHead>Event / Type</TableHead>
+                      <TableHead>Amount</TableHead>
+                      <TableHead>Method & Ref</TableHead>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredPayments.map((p) => {
+                      const StatusIcon = statusConfig[p.status]?.icon || Clock;
+                      return (
+                        <TableRow key={p.id} className="border-border hover:bg-muted/30 transition-colors">
                           <TableCell>
-                            {payment.status !== "paid" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => handleStatusUpdate(payment.id, "paid", new Date().toISOString().split("T")[0])}
-                                className="bg-transparent text-green-400 hover:text-green-300 hover:border-green-400"
-                              >
-                                <CheckCircle className="h-4 w-4 mr-1" />
-                                Mark Paid
-                              </Button>
-                            )}
+                            <div>
+                              <p className="font-semibold">{p.event_name || "General Payment"}</p>
+                              <p className="text-xs text-muted-foreground">{paymentTypeLabels[p.payment_type] || p.payment_type}</p>
+                            </div>
                           </TableCell>
-                        )}
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                          <TableCell className="font-bold text-foreground">
+                            KSh {p.amount.toLocaleString()}
+                          </TableCell>
+                          <TableCell>
+                            <p className="text-sm font-medium">{p.payment_method.toUpperCase()}</p>
+                            <p className="text-xs font-mono text-muted-foreground">{p.transaction_ref || p.receipt_number || "—"}</p>
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {new Date(p.payment_date).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline" className={`${statusConfig[p.status]?.color} border-transparent px-2.5 py-0.5`}>
+                              <StatusIcon className="h-3 w-3 mr-1.5" />
+                              {statusConfig[p.status]?.label}
+                            </Badge>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            )
+          ) : (
+            /* Receipts List */
+            filteredReceipts.length === 0 ? (
+              <div className="p-12 text-center">
+                <ReceiptIcon className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold">No Receipts Published</h3>
+                <p className="text-muted-foreground">Your official receipts will appear here once published by admin.</p>
+              </div>
+            ) : (
+              <div className="grid gap-4 p-4 sm:grid-cols-2">
+                {filteredReceipts.map((r) => (
+                  <div key={r.id} className="group relative bg-muted/30 border border-border/50 rounded-2xl p-5 hover:border-primary/50 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                      <div>
+                        <p className="text-[10px] font-bold text-primary uppercase tracking-[0.2em] mb-1">Official Receipt</p>
+                        <h4 className="font-bold text-lg font-mono">{r.receipt_number}</h4>
+                        <p className="text-xs text-muted-foreground">{r.event_name || "General Payment"}</p>
+                      </div>
+                      <div className="p-2 bg-primary/10 rounded-xl text-primary">
+                        <ReceiptIcon className="w-5 h-5" />
+                      </div>
+                    </div>
+                    
+                    <div className="space-y-2 mb-6">
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Paid Amount:</span>
+                        <span className="font-bold text-foreground font-mono">KSh {r.amount.toLocaleString()}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Method:</span>
+                        <span className="text-foreground">{r.payment_method.toUpperCase()}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span className="text-muted-foreground">Remaining:</span>
+                        <span className="text-blue-400 font-bold">KSh {r.remaining_balance.toLocaleString()}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <Button
+                        variant="ghost"
+                        className="flex-1 bg-background/50 hover:bg-background border border-border/50 h-10 text-xs"
+                        onClick={() => setPreview(r)}
+                      >
+                        <Eye className="w-3.5 h-3.5 mr-2" />
+                        Preview
+                      </Button>
+                      <Button
+                        className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white h-10 text-xs shadow-lg shadow-emerald-500/20"
+                        onClick={() => downloadPDF(r)}
+                        disabled={isGenerating}
+                      >
+                        {isGenerating ? <Clock className="w-3.5 h-3.5 mr-2 animate-spin" /> : <Download className="w-3.5 h-3.5 mr-2" />}
+                        PDF
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )
           )}
         </CardContent>
       </Card>
+
+      {/* Receipt Preview Modal */}
+      {preview && (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-xl p-4 overflow-y-auto" onClick={() => setPreview(null)}>
+      <div className="bg-card border border-border/50 rounded-[2.5rem] max-w-xl w-full my-auto overflow-hidden shadow-2xl scale-in-center animate-in fade-in zoom-in duration-300 relative" onClick={e => e.stopPropagation()}>
+        {/* Glow effect */}
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -mr-16 -mt-16 blur-3xl" />
+        
+        <div className="bg-gradient-to-br from-emerald-500/10 to-teal-500/10 p-6 md:p-10 text-center border-b border-border/50">
+          <div className="w-16 h-16 md:w-20 md:h-20 bg-card rounded-3xl flex items-center justify-center shadow-xl mx-auto mb-4 border border-emerald-500/20">
+            <ReceiptIcon className="w-8 h-8 md:w-10 md:h-10 text-emerald-500" />
+          </div>
+          <h3 className="text-xl md:text-2xl font-black text-foreground tracking-tight">Official PPT Receipt</h3>
+          <p className="text-xs md:text-sm font-mono text-emerald-500/60 mt-1.5 uppercase tracking-widest font-bold">{preview.receipt_number}</p>
+        </div>
+        <div className="p-6 md:p-10 space-y-5 md:space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+            {[
+              ["Student", preview.student_name],
+              ["Purpose", preview.event_name || "Tuition/General"],
+              ["Amount", `KSh ${preview.amount.toLocaleString()}`],
+              ["Method", preview.payment_method.toUpperCase()],
+              ["Date", new Date(preview.payment_date).toLocaleDateString()],
+              ["Reference", preview.transaction_ref || "—"],
+              ["Balance", `KSh ${preview.remaining_balance.toLocaleString()}`],
+            ].map(([label, value]) => (
+              <div key={label} className="bg-muted/30 p-4 rounded-2xl border border-border/30">
+                <span className="text-[10px] text-muted-foreground uppercase font-black tracking-widest block mb-1">{label}</span>
+                <span className="font-bold text-foreground text-sm line-clamp-1">{value}</span>
+              </div>
+            ))}
+          </div>
+          <div className="pt-2 flex flex-col sm:flex-row gap-3">
+            <Button 
+              onClick={() => downloadPDF(preview)} 
+              disabled={isGenerating}
+              className="flex-1 bg-emerald-500 hover:bg-emerald-600 text-white h-12 md:h-14 rounded-2xl shadow-xl shadow-emerald-500/20 font-bold transition-all hover:scale-[1.02]"
+            >
+              {isGenerating ? <Clock className="w-5 h-5 mr-2 animate-spin" /> : <Download className="w-5 h-5 mr-2" />}
+              Download Official PDF
+            </Button>
+            <Button variant="outline" onClick={() => setPreview(null)} className="h-12 md:h-14 md:px-6 rounded-2xl border-border/50 bg-background/50 font-bold">
+              Close Preview
+            </Button>
+          </div>
+        </div>
+        <div className="px-10 py-5 bg-muted/40 text-center border-t border-border/30">
+          <p className="text-[10px] text-muted-foreground uppercase tracking-[0.3em] font-black">Powered by Peak Performance Tutoring Systems</p>
+        </div>
+      </div>
+    </div>
+      )}
+      {/* Hidden PDF Template for Capture */}
+      <div style={{ position: "absolute", left: "-9999px", top: "-9999px" }} aria-hidden="true">
+        {preview && <PremiumReceiptTemplate receipt={preview} />}
+      </div>
     </div>
   );
 }

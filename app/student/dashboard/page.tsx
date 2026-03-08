@@ -48,6 +48,7 @@ import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
 import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
 import StudentAttendanceSummary from "@/components/student/StudentAttendanceSummary";
+import AttendanceOverviewCard from "@/components/student/AttendanceOverviewCard";
 
 
 const supabase = createClient();
@@ -726,8 +727,13 @@ export default function StudentDashboard() {
             {/* Upcoming Exams Section */}
             {profile && <StudentUpcomingExams studentClassName={profile.form_class} />}
 
-            {/* Attendance Summary — shown if student has attendance data */}
-            {profile && <StudentAttendanceSummary studentId={profile.id} />}
+            {/* Attendance Overview Card - Replaced StudentAttendanceSummary for a premium look */}
+            {profile && (
+              <AttendanceOverviewCard 
+                studentId={profile.id} 
+                onViewFull={() => setActiveTab("attendance")}
+              />
+            )}
 
             {/* Content Grid: Calendar + Stats */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

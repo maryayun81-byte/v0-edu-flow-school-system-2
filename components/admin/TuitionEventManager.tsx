@@ -47,6 +47,7 @@ interface TuitionEvent {
   excluded_dates: string[];
   attendance_threshold: number;
   status: "upcoming" | "active" | "completed" | "cancelled";
+  tuition_fee: number;
   created_at: string;
 }
 
@@ -73,6 +74,7 @@ const EMPTY_FORM = {
   days_of_operation: ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
   excluded_dates_text: "", // comma separated
   attendance_threshold: 80,
+  tuition_fee: 0,
 };
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -240,6 +242,7 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
       days_of_operation: event.days_of_operation,
       excluded_dates_text: (event.excluded_dates || []).join(", "),
       attendance_threshold: event.attendance_threshold,
+      tuition_fee: event.tuition_fee || 0,
     });
     setError("");
     setShowForm(true);
@@ -282,6 +285,7 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
       days_of_operation: formData.days_of_operation,
       excluded_dates: excluded,
       attendance_threshold: formData.attendance_threshold,
+      tuition_fee: formData.tuition_fee,
       created_by: adminId,
     };
 
@@ -411,18 +415,16 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label>Attendance Evaluation Days</Label>
+              <Label>Attendance Eval Days</Label>
               <Input
                 type="number"
                 min={1}
-                max={62}
                 value={formData.attendance_eval_days}
                 onChange={e => setFormData(p => ({ ...p, attendance_eval_days: parseInt(e.target.value) || 12 }))}
                 className="bg-muted border-border/50"
               />
-              <p className="text-xs text-muted-foreground">e.g., 12 for April, 31 for December</p>
             </div>
             <div className="space-y-2">
               <Label>Exam Day Number</Label>
@@ -433,10 +435,9 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
                 onChange={e => setFormData(p => ({ ...p, exam_day_number: parseInt(e.target.value) || 13 }))}
                 className="bg-muted border-border/50"
               />
-              <p className="text-xs text-muted-foreground">e.g., Day 13 is the exam day</p>
             </div>
             <div className="space-y-2">
-              <Label>Min. Attendance Threshold (%)</Label>
+              <Label>Threshold (%)</Label>
               <Input
                 type="number"
                 min={0}
@@ -444,6 +445,16 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
                 value={formData.attendance_threshold}
                 onChange={e => setFormData(p => ({ ...p, attendance_threshold: parseFloat(e.target.value) || 80 }))}
                 className="bg-muted border-border/50"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label>Tuition Fee (KSh)</Label>
+              <Input
+                type="number"
+                min={0}
+                value={formData.tuition_fee}
+                onChange={e => setFormData(p => ({ ...p, tuition_fee: parseFloat(e.target.value) || 0 }))}
+                className="bg-muted border-border/50 font-bold text-emerald-400"
               />
             </div>
           </div>

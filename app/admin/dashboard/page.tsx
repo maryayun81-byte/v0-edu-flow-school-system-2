@@ -53,6 +53,7 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import MessagingCenter from "@/components/MessagingCenter";
 import { MessageSquare } from "lucide-react";
+import AdvancedFinanceManager from "@/components/admin/finance/AdvancedFinanceManager";
 
 const supabase = createClient();
 
@@ -1005,9 +1006,8 @@ export default function AdminDashboard() {
           <NotificationCreator adminId={adminId} />
         )}
 
-        {/* Finance Tab */}
         {activeTab === "finance" && adminId && (
-          <TuitionManager userRole="admin" userId={adminId} />
+          <AdvancedFinanceManager adminId={adminId} />
         )}
 
         {/* Messages Tab */}

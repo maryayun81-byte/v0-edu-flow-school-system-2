@@ -10,7 +10,13 @@ import {
   Shield,
   Calendar,
   TrendingUp,
+  Sparkles,
+  Loader2,
+  RefreshCcw,
+  Zap,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
 const supabase = createClient();
 
@@ -45,6 +51,21 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
   const [summaries, setSummaries] = useState<AttendanceSummaryData[]>([]);
   const [recentDays, setRecentDays] = useState<RecentDay[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selectedEventId, setSelectedEventId] = useState<string>("all");
+  const [aiInsight, setAiInsight] = useState<string>("");
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+
+  const filteredSummaries = selectedEventId === "all" 
+    ? summaries 
+    : summaries.filter(s => s.event_id === selectedEventId);
+
+  const filteredRecentDays = selectedEventId === "all"
+    ? recentDays
+    : recentDays.filter(d => {
+        // Find if this date/status matches the selected event's name
+        const eventName = summaries.find(s => s.event_id === selectedEventId)?.event_name;
+        return d.event_name === eventName;
+      });
 
   useEffect(() => {
     if (studentId) {
@@ -156,6 +177,47 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
     setLoading(false);
   }
 
+  async function generateAiInsights() {
+    if (summaries.length === 0) return;
+    
+    setIsGeneratingAi(true);
+    setAiInsight("");
+    
+    try {
+      const response = await fetch("/api/ai/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "student-attendance",
+          data: {
+            summaries: summaries.map(s => ({
+              event: s.event_name,
+              percentage: s.attendance_percentage,
+              eligible: s.is_eligible,
+              absent: s.days_absent,
+              late: s.days_late
+            })),
+            recentDays: recentDays.slice(0, 7)
+          },
+          context: {
+            studentName: "Student",
+            studentId: studentId
+          }
+        })
+      });
+
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      setAiInsight(result.insight);
+      toast.success("Personalized AI insights ready!");
+    } catch (error: any) {
+      console.error("AI Insight Error:", error);
+      toast.error(error.message || "Failed to generate AI insights");
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  }
+
 
   if (loading) {
     return (
@@ -180,13 +242,77 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
 
   return (
     <div className="space-y-4">
-      <h3 className="font-semibold text-foreground flex items-center gap-2">
-        <Calendar className="w-5 h-5 text-primary" />
-        Tuition Attendance
-      </h3>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-2">
+        <h3 className="font-bold text-foreground flex items-center gap-2">
+          <Calendar className="w-5 h-5 text-primary" />
+          Attendance Records
+        </h3>
+        <div className="w-full sm:w-64">
+          <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+            <SelectTrigger className="bg-card/50 border-border/50 h-10 rounded-xl">
+              <SelectValue placeholder="All Events" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Events</SelectItem>
+              {summaries.map(s => (
+                <SelectItem key={s.event_id} value={s.event_id}>{s.event_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {/* Student AI Insights Card */}
+      <div className="relative group overflow-hidden rounded-[2rem] border border-primary/20 bg-gradient-to-br from-primary/5 via-transparent to-primary/10 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-primary/20 transition-all duration-700" />
+        <div className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-primary/20 flex items-center justify-center text-primary shadow-lg shadow-primary/10">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="font-black text-foreground text-sm uppercase tracking-wider">Learning Mentor AI</h4>
+                <p className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.2em] opacity-60">Personalized Insights</p>
+              </div>
+            </div>
+            <button
+              onClick={generateAiInsights}
+              disabled={isGeneratingAi}
+              className="px-4 py-2 bg-slate-900 border border-border/50 hover:border-primary/50 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 flex items-center gap-2"
+            >
+              {isGeneratingAi ? (
+                <>
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Analyzing...
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3 h-3 text-amber-400" />
+                  Get AI Advice
+                </>
+              )}
+            </button>
+          </div>
+          
+          {aiInsight ? (
+            <div className="bg-card/30 backdrop-blur-sm rounded-2xl p-5 border border-primary/10 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <p className="text-sm leading-relaxed text-slate-300 font-medium italic">
+                {aiInsight}
+              </p>
+            </div>
+          ) : (
+            <div className="bg-background/40 border border-dashed border-border/50 rounded-2xl py-8 px-6 text-center">
+              <p className="text-xs text-muted-foreground font-medium max-w-xs mx-auto">
+                Need advice on your attendance? Our AI mentor can analyze your records and provide personalized consistency tips.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* Per-Event Summaries */}
-      {summaries.map(summary => (
+      {filteredSummaries.map(summary => (
         <div key={summary.event_id} className="bg-card border border-border/50 rounded-2xl p-5">
           <div className="flex items-start justify-between mb-4 flex-wrap gap-3">
             <div>
@@ -255,13 +381,18 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
       ))}
 
       {/* Recent Attendance Mini Calendar */}
-      {recentDays.length > 0 && (
-        <div className="bg-card border border-border/50 rounded-2xl p-5">
-          <h4 className="text-sm font-semibold text-foreground mb-3">
-            Recent Attendance (Last 30 Days)
-          </h4>
-          <div className="flex flex-wrap gap-1.5">
-            {[...recentDays].reverse().map((day, i) => (
+      {filteredRecentDays.length > 0 && (
+        <div className="bg-card border border-border/50 rounded-[2rem] p-6 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h4 className="text-sm font-black text-foreground uppercase tracking-wider">
+              Recent Consistency
+            </h4>
+            <div className="text-[10px] text-muted-foreground font-bold uppercase bg-muted/50 px-2 py-0.5 rounded-md">
+              Last 30 Days
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {[...filteredRecentDays].reverse().map((day, i) => (
               <div
                 key={i}
                 title={`${day.attendance_date}: ${day.status} (${day.event_name})`}

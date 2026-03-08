@@ -1,15 +1,13 @@
 'use client';
 
-import React from "react"
-
+import React from "react";
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient, AuthChangeEvent } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+// Use the shared project Supabase client that correctly handles
+// cookie-based sessions (crucial for reading the session after login redirect)
+const supabase = createClient();
 
 export default function StudentDashboardLayout({
   children,
@@ -22,30 +20,39 @@ export default function StudentDashboardLayout({
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
+        // Use getUser() (server-verified) rather than getSession() (local-only cache)
+        const { data: { user }, error } = await supabase.auth.getUser();
 
-        if (!session) {
-          router.push('/student/login');
+        if (error || !user) {
+          router.replace('/student/login');
+          return;
+        }
+
+        // Verify role as a second layer of protection
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('role')
+          .eq('id', user.id)
+          .single();
+
+        if (profile?.role !== 'student') {
+          router.replace('/student/login');
           return;
         }
 
         setLoading(false);
       } catch (error) {
         console.error('Auth check error:', error);
-        router.push('/student/login');
+        router.replace('/student/login');
       }
     };
 
     checkAuth();
 
-    // Subscribe to auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event: AuthChangeEvent, session) => {
+    // Subscribe to auth state changes to handle sign-out / session expiry
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event: string, session: any) => {
       if (!session && event !== 'INITIAL_SESSION') {
-        router.push('/student/login');
+        router.replace('/student/login');
       }
     });
 
@@ -56,8 +63,8 @@ export default function StudentDashboardLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600" />
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-10 h-10 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
       </div>
     );
   }

@@ -6,12 +6,10 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   LineChart, Line, PieChart, Pie, Cell, Legend 
 } from "recharts";
-import { 
-  Users, CheckCircle2, AlertCircle, TrendingUp, 
-  Calendar, School, UserCheck, UserMinus 
-} from "lucide-react";
+import { Users, CheckCircle2, AlertCircle, TrendingUp, Calendar, School, UserCheck, UserMinus, Sparkles, Loader2, RefreshCcw } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { toast } from "sonner";
 
 const supabase = createClient();
 
@@ -38,6 +36,9 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
   const [dailyTrend, setDailyTrend] = useState<any[]>([]);
   const [distribution, setDistribution] = useState<any[]>([]);
   const [atRiskStudents, setAtRiskStudents] = useState<any[]>([]);
+  const [aiInsight, setAiInsight] = useState<string>("");
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
+  const [totalEnrolled, setTotalEnrolled] = useState(0);
 
   useEffect(() => {
     fetchInitialData();
@@ -60,6 +61,24 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
 
     if (ctData) {
       setClassInfo((ctData as any).classes);
+      const classId = (ctData as any).class_id;
+
+      // New: Correct total students count from profiles
+      const { count } = await supabase
+        .from("profiles")
+        .select("*", { count: 'exact', head: true })
+        .eq("role", "student")
+        .eq("form_class_id", classId); // Assuming form_class_id exists or filtering by class name
+
+      // Let's try matching by class name if id doesn't match
+      const class_name = (ctData as any).classes.name;
+      const { count: enrolledCount } = await supabase
+        .from("profiles")
+        .select("*", { count: 'exact', head: true })
+        .eq("role", "student")
+        .eq("form_class", class_name);
+
+      setTotalEnrolled(enrolledCount || 0);
       
       // 2. Get active/recent events
       const { data: eventData } = await supabase
@@ -73,6 +92,49 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
       }
     }
     setLoading(false);
+  }
+
+  async function generateAiInsights() {
+    if (!selectedEventId || !classInfo) return;
+    
+    setIsGeneratingAi(true);
+    setAiInsight("");
+    
+    try {
+      const response = await fetch("/api/ai/insights", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "teacher-attendance",
+          data: {
+            totalStudents: totalEnrolled,
+            avgAttendance: stats.avgAttendance,
+            atRiskCount: stats.atRiskCount,
+            perfectAttendanceCount: stats.perfectAttendanceCount,
+            dailyTrend: dailyTrend.slice(-7), // Last 7 days
+            atRiskStudents: atRiskStudents.map(s => ({
+              name: (s.profiles as any).full_name,
+              percentage: s.attendance_percentage
+            })).slice(0, 5) // Top 5 at-risk
+          },
+          context: {
+            className: classInfo.name,
+            eventName: events.find(e => e.id === selectedEventId)?.name || "Unknown",
+            eventId: selectedEventId
+          }
+        })
+      });
+
+      const result = await response.json();
+      if (result.error) throw new Error(result.error);
+      setAiInsight(result.insight);
+      toast.success("AI insights generated successfully!");
+    } catch (error: any) {
+      console.error("AI Insight Error:", error);
+      toast.error(error.message || "Failed to generate AI insights");
+    } finally {
+      setIsGeneratingAi(false);
+    }
   }
 
   async function fetchAnalyticsData() {
@@ -211,7 +273,7 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
               <Badge variant="outline" className="text-[10px] uppercase font-bold tracking-widest opacity-60">Total</Badge>
             </div>
             <div className="space-y-1">
-              <h4 className="text-2xl font-black text-foreground">{stats.totalStudents}</h4>
+              <h4 className="text-2xl font-black text-foreground">{totalEnrolled}</h4>
               <p className="text-xs text-muted-foreground font-medium uppercase tracking-wider">Students Enrolled</p>
             </div>
           </CardContent>
@@ -262,6 +324,56 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
           </CardContent>
         </Card>
       </div>
+
+      {/* AI Insights Section */}
+      <Card className="bg-gradient-to-br from-emerald-500/5 to-teal-500/10 border-emerald-500/20 shadow-xl overflow-hidden relative group my-6">
+        <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-500/10 rounded-full -mr-16 -mt-16 blur-3xl group-hover:bg-emerald-500/20 transition-all duration-700" />
+        <CardHeader className="flex flex-row items-center justify-between pb-2 border-b border-emerald-500/10 mb-4">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/20 flex items-center justify-center text-emerald-500 animate-pulse">
+              <Sparkles className="w-4 h-4" />
+            </div>
+            <div>
+              <CardTitle className="text-lg font-bold text-foreground">Real-Time AI Insights</CardTitle>
+              <CardDescription className="text-xs text-emerald-500/60 flex items-center gap-1.5">
+                Powered by Google Gemini AI · Analyzing performance
+              </CardDescription>
+            </div>
+          </div>
+          <button 
+            type="button"
+            onClick={generateAiInsights}
+            disabled={isGeneratingAi}
+            className="flex items-center gap-2 px-4 py-2 bg-emerald-500 hover:bg-emerald-600 border border-emerald-500/30 disabled:opacity-50 text-white text-xs font-bold rounded-xl transition-all shadow-lg shadow-emerald-500/20"
+          >
+            {isGeneratingAi ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Thinking...
+              </>
+            ) : (
+              <>
+                <RefreshCcw className="w-3.5 h-3.5" />
+                Generate Insight
+              </>
+            )}
+          </button>
+        </CardHeader>
+        <CardContent>
+          {aiInsight ? (
+            <div className="prose prose-invert prose-sm max-w-none prose-p:text-slate-300 prose-strong:text-emerald-400 prose-headings:text-white prose-ul:text-slate-400 animate-in fade-in slide-in-from-bottom-2 duration-500">
+              <div dangerouslySetInnerHTML={{ __html: aiInsight.replace(/\n/g, '<br/>') }} />
+            </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center py-8 text-center bg-background/30 rounded-2xl border border-dashed border-emerald-500/20">
+              <Sparkles className="w-8 h-8 text-emerald-500/20 mb-3" />
+              <p className="text-sm text-muted-foreground font-medium max-w-xs">
+                Click the button above to generate professional AI insights for your class performance.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
