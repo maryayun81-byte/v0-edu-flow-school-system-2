@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 import { 
   FileText, Calendar, Clock, CheckCircle2, ChevronRight, 
   Wifi, WifiOff, AlertCircle, ArrowLeft, ArrowRight
@@ -11,10 +11,7 @@ import { cn } from '@/lib/utils';
 import AssignmentOnlinePlayer from '@/components/AssignmentOnlinePlayer';
 import AssignmentOfflineSubmission from '@/components/AssignmentOfflineSubmission';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface StudentAssignmentsManagerProps {
   studentId: string;
@@ -41,39 +38,56 @@ export default function StudentAssignmentsManager({
     try {
       setLoading(true);
       
-      let targetClassId = classId;
-      if (!targetClassId && studentClass) {
-          const { data: cls } = await supabase
-            .from('classes')
-            .select('id')
-            .eq('name', studentClass)
-            .single();
-          if (cls) targetClassId = cls.id;
-      }
+      // 1. Fetch all class IDs the student is enrolled in
+      const { data: enrollmentData, error: enrollmentError } = await supabase
+        .from('student_classes')
+        .select('class_id')
+        .eq('student_id', studentId);
 
-      if (!targetClassId) {
-          console.warn("No class ID found for student assignments");
+      if (enrollmentError) throw enrollmentError;
+
+      const classIds = enrollmentData?.map((e: any) => e.class_id) || [];
+
+      // Fallback to classId prop if provided (for specific class view)
+      const targetClassIds = classId ? [classId] : classIds;
+
+      if (targetClassIds.length === 0) {
+          console.warn("No class enrollments found for student assignments");
+          setAssignments([]);
           setLoading(false);
           return;
       }
 
+      // 2. Fetch Assignments
       const { data, error } = await supabase
         .from('assignments')
         .select(`
           *,
-          subjects(name),
-          student_submissions!left(id, status, score, submitted_at)
+          subjects(name)
         `)
-        .eq('class_id', targetClassId)
+        .in('class_id', targetClassIds)
         .eq('status', 'PUBLISHED')
-        .eq('student_submissions.student_id', studentId)
         .order('due_date', { ascending: true });
 
       if (error) throw error;
 
-      const processed = data?.map(a => ({
+      if (!data) {
+          setAssignments([]);
+          return;
+      }
+
+      // 3. Fetch Student's submissions for these assignments
+      const { data: submissionsData } = await supabase
+        .from('student_submissions')
+        .select('id, assignment_id, status, score, submitted_at')
+        .eq('student_id', studentId)
+        .in('assignment_id', data.map(a => a.id));
+
+      const submissionsMap = new Map(submissionsData?.map((s: any) => [s.assignment_id, s]) || []);
+
+      const processed = data?.map((a: any) => ({
           ...a,
-          submission: a.student_submissions?.[0] || null
+          submission: submissionsMap.get(a.id) || null
       })) || [];
 
       setAssignments(processed);

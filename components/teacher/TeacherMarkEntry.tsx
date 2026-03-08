@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import {
   Save,
   X,
@@ -14,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { createClient } from "@/lib/supabase/client";
 import {
   Select,
   SelectContent,
@@ -22,10 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Exam {
   id: string;
@@ -205,7 +202,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
       setStudents(filteredStudents);
       // Initialize marks map
       const initialMarks = new Map<string, MarkEntry>();
-      data.forEach((student) => {
+      data.forEach((student: any) => {
         initialMarks.set(student.id, {
           student_id: student.id,
           score: 0,
@@ -230,7 +227,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
       const existingMap = new Map();
       const marksMap = new Map(marks);
 
-      data.forEach((mark) => {
+      data.forEach((mark: any) => {
         existingMap.set(mark.student_id, mark);
         marksMap.set(mark.student_id, {
           student_id: mark.student_id,
@@ -403,7 +400,15 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
             </SelectTrigger>
             <SelectContent>
               {exams
-                .filter(e => e.system_type === selectedCurriculum || e.system_type === 'Combined')
+                .filter(e => {
+                  // Broadened Filter:
+                  // 1. Match curriculum
+                  // 2. OR system_type is null/empty/undefined
+                  // 3. OR system_type is 'Combined'
+                  if (e.system_type === 'Combined') return true;
+                  if (!e.system_type) return true; // Legacy support
+                  return e.system_type === selectedCurriculum;
+                })
                 .map((exam) => (
                 <SelectItem key={exam.id} value={exam.id}>
                   {exam.exam_name}

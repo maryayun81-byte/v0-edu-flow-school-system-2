@@ -38,30 +38,34 @@ export default function StudentUpcomingExams({ studentClassName }: StudentUpcomi
 
   async function fetchExams() {
     try {
-      // 1. Get Class ID for the student's class name
-      const { data: classData, error: classError } = await supabase
-        .from("classes")
-        .select("id")
-        .eq("name", studentClassName)
-        .single();
+      // 1. Get Class IDs for the student
+      const { data: enrollmentData, error: enrollmentError } = await supabase
+        .from("student_classes")
+        .select("class_id"); // Uses auth.uid() automatically if RLS is on, or we'd need to pass it
 
-      if (classError || !classData) {
-        console.error("Error fetching class ID:", classError);
+      if (enrollmentError) {
+        console.error("Error fetching enrollments:", enrollmentError);
         setLoading(false);
         return;
       }
 
-      const studentClassId = classData.id;
+      const studentClassIds = enrollmentData?.map(e => e.class_id) || [];
+
+      if (studentClassIds.length === 0) {
+          setExams([]);
+          setLoading(false);
+          return;
+      }
 
       // 2. Fetch Active Exams
       // Filter logic:
-      // - Status is Active or Upcoming (Active covers both in this system typically, or we check dates)
-      // - Student's class is in applicable_classes
+      // - Status is Active
+      // - Student's class is in applicable_classes (array overlap check)
       const { data: examsData, error: examsError } = await supabase
         .from("exams")
         .select("*")
-        .in("status", ["Active"]) // Only show Active exams (admins activate them)
-        .contains("applicable_classes", [studentClassId]) // Class Filter
+        .in("status", ["Active"])
+        .overlaps("applicable_classes", studentClassIds) // Filter: any class in student's list matches any in exam list
         .order("start_date", { ascending: true });
 
       if (examsError) {

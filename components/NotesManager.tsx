@@ -1,13 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 import { Upload, X, FileText, Loader, Sparkles, CheckCircle2 } from 'lucide-react';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface NotesManagerProps {
   onClose: () => void;
@@ -80,7 +77,7 @@ export default function NotesManager({ onClose, userId }: NotesManagerProps) {
   // Filter Classes based on Curriculum
   const filteredClasses = useMemo(() => {
     if (!selectedCurriculum) return [];
-    return classes.filter(c => {
+    return classes.filter((c: { name: string }) => {
         const name = c.name.toLowerCase();
         if (selectedCurriculum === 'CBC') {
             return name.startsWith('grade') || name.startsWith('pp') || name.includes('(cbc)');

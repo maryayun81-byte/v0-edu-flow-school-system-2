@@ -228,20 +228,26 @@ export default function TeacherDashboard() {
   function setupRealtimeSubscriptions() {
     const notesChannel = supabase
       .channel('teacher-notes')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notes' }, () => {
-        addNotification('New note added successfully!');
-        fetchContent();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'notes' }, (payload: any) => {
+        if (user && payload.new.created_by === user.id) {
+          addNotification('New note added successfully!');
+          fetchContent();
+        }
       })
       .subscribe();
 
     const assignmentsChannel = supabase
       .channel('teacher-assignments')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assignments' }, () => {
-        addNotification('New assignment created!');
-        fetchContent();
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'assignments' }, (payload: any) => {
+        if (user && payload.new.teacher_id === user.id) {
+          addNotification('New assignment created!');
+          fetchContent();
+        }
       })
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assignments' }, () => {
-        fetchContent();
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'assignments' }, (payload: any) => {
+        if (user && payload.new.teacher_id === user.id) {
+          fetchContent();
+        }
       })
       .subscribe();
 
@@ -268,10 +274,20 @@ export default function TeacherDashboard() {
   }
 
   async function fetchContent() {
+    if (!user) return;
+    
     try {
       const [notesRes, assignmentsRes] = await Promise.all([
-        supabase.from('notes').select('*').order('created_at', { ascending: false }),
-        supabase.from('assignments').select('*').order('due_date', { ascending: true }),
+        supabase
+          .from('notes')
+          .select('*')
+          .eq('created_by', user.id)
+          .order('created_at', { ascending: false }),
+        supabase
+          .from('assignments')
+          .select('*')
+          .eq('teacher_id', user.id)
+          .order('due_date', { ascending: true }),
       ]);
 
       if (notesRes.data) setNotes(notesRes.data);

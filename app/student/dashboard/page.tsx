@@ -45,6 +45,7 @@ import { StudentDashboardSkeleton } from "@/components/DashboardSkeleton";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
 import StudentResults from "@/components/StudentResults";
 import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
+import StudentNotesManager from "@/components/StudentNotesManager";
 import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
 import StudentAttendanceSummary from "@/components/student/StudentAttendanceSummary";
@@ -314,20 +315,41 @@ export default function StudentDashboard() {
 
   async function fetchContent(profileData?: any) {
     const currentProfile = profileData || profile;
+    if (!currentProfile?.id) return;
+
+    // 1. Fetch Class Enrollments
+    const { data: enrollments } = await supabase
+      .from('student_classes')
+      .select('class_id')
+      .eq('student_id', currentProfile.id);
+    
+    const classIds = enrollments?.map((e: any) => e.class_id) || [];
+
+    // 2. Fetch Content with class filters
     const [notesRes, assignmentsRes, quizzesRes] = await Promise.all([
-      supabase.from("notes").select("*").order("created_at", { ascending: false }),
-      supabase.from("assignments").select("*").eq("is_archived", false).order("due_date", { ascending: true }),
-      supabase.from("quizzes").select("*").eq("is_published", true).order("created_at", { ascending: false }),
+      supabase
+        .from("notes")
+        .select("*")
+        .in("class_id", classIds)
+        .order("created_at", { ascending: false }),
+      supabase
+        .from("assignments")
+        .select("*")
+        .in("class_id", classIds)
+        .eq("status", "PUBLISHED")
+        .order("due_date", { ascending: true }),
+      supabase
+        .from("quizzes")
+        .select("*")
+        .eq("is_published", true)
+        .order("created_at", { ascending: false }),
     ]);
 
     if (notesRes.data) setNotes(notesRes.data);
     
     // Process assignments to check for submissions
     if (assignmentsRes.data) {
-        // We need to know which ones are submitted.
-        // For simple widget logic, we'll optimistically assume 'is_completed' means 'has submission'
-        // But since we can't join easily in one go for all (without RPC), we might do a quick check or just fetch all submissions for this user?
-        // Let's fetch the user's submissions to map status
+        // Fetch the user's submissions to map status
         const { data: subs } = await supabase
             .from('student_submissions')
             .select('assignment_id')
@@ -744,7 +766,10 @@ export default function StudentDashboard() {
 
               {/* Stats - Right Column on Desktop */}
               <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="bg-card border border-border/50 rounded-xl p-5">
+                <div 
+                  onClick={() => setActiveTab("notes")}
+                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-primary/50 transition-all hover:bg-muted/30"
+                >
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
                       <FileText className="w-5 h-5 text-primary" />
@@ -754,7 +779,10 @@ export default function StudentDashboard() {
                   <p className="text-sm text-muted-foreground">Study Materials</p>
                 </div>
 
-                <div className="bg-card border border-border/50 rounded-xl p-5">
+                <div 
+                  onClick={() => setActiveTab("assignments")}
+                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-chart-3/50 transition-all hover:bg-muted/30"
+                >
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 bg-chart-3/20 rounded-lg flex items-center justify-center">
                       <Target className="w-5 h-5 text-chart-3" />
@@ -764,7 +792,10 @@ export default function StudentDashboard() {
                   <p className="text-sm text-muted-foreground">Pending Tasks</p>
                 </div>
 
-                <div className="bg-card border border-border/50 rounded-xl p-5">
+                <div 
+                  onClick={() => setActiveTab("quizzes")}
+                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-accent/50 transition-all hover:bg-muted/30"
+                >
                   <div className="flex items-center gap-3 mb-2">
                     <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
                       <Brain className="w-5 h-5 text-accent" />
@@ -823,7 +854,8 @@ export default function StudentDashboard() {
                   {pendingAssignments.slice(0, 3).map((assignment) => (
                     <div
                       key={assignment.id}
-                      className="flex items-center justify-between p-3 bg-muted/50 rounded-lg"
+                      onClick={() => setActiveTab("assignments")}
+                      className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-transparent hover:border-border/50"
                     >
                       <div>
                         <p className="font-medium text-foreground">{assignment.title}</p>
@@ -848,38 +880,8 @@ export default function StudentDashboard() {
         )}
 
         {/* Notes Tab */}
-        {activeTab === "notes" && (
-          <div className="space-y-4">
-            {notes.length === 0 ? (
-              <div className="col-span-full text-center py-12">
-                <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-4" />
-                <p className="text-muted-foreground">No study materials available yet</p>
-              </div>
-            ) : (
-              notes.map((note) => (
-                <div
-                  key={note.id}
-                  className="bg-card border border-border/50 rounded-xl p-5 hover:border-primary/50 transition-all"
-                >
-                  <h3 className="font-semibold text-foreground mb-2">{note.title}</h3>
-                  <p className="text-sm text-muted-foreground line-clamp-2 mb-4">
-                    {note.description}
-                  </p>
-                  {note.file_url && (
-                    <a
-                      href={note.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-2 text-sm text-primary hover:underline"
-                    >
-                      <BookOpen className="w-4 h-4" />
-                      View Document
-                    </a>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
+        {activeTab === "notes" && profile && (
+          <StudentNotesManager studentId={profile.id} />
         )}
 
         {/* Assignments Tab */}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { 
   Calendar, CheckCircle, Clock, AlertTriangle, ChevronRight, 
   FileText, Plus, Bell, MessageSquare, Zap, Target, TrendingUp, 
@@ -43,10 +43,7 @@ interface RecentActivity {
   color: string;
 }
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -76,12 +73,20 @@ export default function TeacherHome({ userId, userName, onNavigate }: TeacherHom
     try {
       setLoading(true);
 
-      // 1. Fetch Today's Classes (Keeping existing logic)
+      // 0. Fetch Teacher's Classes first to filter other data
+      const { data: teacherClasses } = await supabase
+        .from('teacher_classes')
+        .select('class_id')
+        .eq('teacher_id', userId);
+      
+      const myClassIds = teacherClasses?.map((tc: { class_id: string }) => tc.class_id) || [];
+
+      // 1. Fetch Today's Classes
       const { data: sessions } = await supabase
         .from('timetable_sessions')
         .select(`
           id, subject, start_time, end_time, room,
-          classes!inner(name)
+          classes!inner(id, name)
         `)
         .eq('teacher_id', userId)
         .eq('day_of_week', dayName)
@@ -111,7 +116,7 @@ export default function TeacherHome({ userId, userName, onNavigate }: TeacherHom
       });
       setTodayClasses(processedClasses);
 
-      // 2. Fetch Assignments & Submissions (Real Data)
+      // 2. Fetch Assignments & Submissions (Filtered by teacher_id)
       const { data: recentAssignments } = await supabase
         .from('assignments')
         .select(`
@@ -123,11 +128,12 @@ export default function TeacherHome({ userId, userName, onNavigate }: TeacherHom
         .order('created_at', { ascending: false })
         .limit(5);
 
-      // 3. Fetch Active/Closed Exams (Real Data)
+      // 3. Fetch Active/Closed Exams (Filtered by applicable classes)
       const { data: exams } = await supabase
         .from('exams')
         .select('*')
         .in('status', ['Active', 'Closed'])
+        .contains('applicable_classes', myClassIds.length > 0 ? myClassIds : ['00000000-0000-0000-0000-000000000000'])
         .order('end_date', { ascending: true });
 
       // 4. Fetch Messages (Real Data - simplified)

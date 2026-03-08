@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
 import { 
   X, Check, ChevronRight, ChevronLeft, Upload, FileText, 
   Calendar, Settings, Users, BookOpen, Clock, AlertCircle, 
@@ -9,12 +8,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import QuestionBuilder, { Question } from '@/components/QuestionBuilder';
+import { createClient } from "@/lib/supabase/client";
 
-// Initialize Supabase Client
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface AssignmentWizardProps {
   onClose: () => void;
@@ -95,15 +91,13 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
                 if (allSubjects) {
                     setSubjects(allSubjects);
                     
-                    // For Admin, we can say every class "supports" every subject (flexible) 
-                    // OR we just map all subject names to every class so the filter passes.
-                    const allSubjectNames = allSubjects.map(s => s.name);
+                    const allSubjectNames = allSubjects.map((s: any) => s.name);
                     
                     setClasses(allClasses.map((c: any) => ({
                         id: c.id,
                         name: c.name,
                         form_level: c.form_level,
-                        subjects: allSubjectNames // Allow admin to pick ANY subject for ANY class
+                        subjects: allSubjectNames
                     })));
                 }
             }
@@ -131,18 +125,34 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
             }));
             setClasses(processedClasses);
     
-            // 2. Fetch All Subjects to Map Names -> IDs
-            const allSubjectNames = Array.from(new Set(processedClasses.flatMap(c => c.subjects)));
+            // 2. Fetch Subjects by Name OR ID
+            const allSubjectIdentifiers = Array.from(new Set(processedClasses.flatMap(c => c.subjects)));
             
-            if (allSubjectNames.length > 0) {
-                const { data: subjectData } = await supabase
-                .from('subjects')
-                .select('id, name')
-                .in('name', allSubjectNames);
+            if (allSubjectIdentifiers.length > 0) {
+                // Try fetching by name first, if none found try by ID
+                const { data: subjectDataByName } = await supabase
+                    .from('subjects')
+                    .select('id, name')
+                    .in('name', allSubjectIdentifiers);
                 
-                if (subjectData) {
-                    setSubjects(subjectData);
+                let finalSubjects = subjectDataByName || [];
+
+                // If some identifiers didn't match names, they might be IDs
+                const mappedNames = new Set(finalSubjects.map((s: any) => s.name));
+                const potentialIds = allSubjectIdentifiers.filter((id: any) => !mappedNames.has(id));
+
+                if (potentialIds.length > 0) {
+                    const { data: subjectDataById } = await supabase
+                        .from('subjects')
+                        .select('id, name')
+                        .in('id', (potentialIds as string[]).filter(id => id.length === 36)); // Simple UUID check
+                    
+                    if (subjectDataById) {
+                        finalSubjects = [...finalSubjects, ...subjectDataById];
+                    }
                 }
+                
+                setSubjects(finalSubjects);
             }
         }
 
@@ -175,8 +185,13 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
     if (!selectedClassId) return [];
     const cls = classes.find(c => c.id === selectedClassId);
     if (!cls) return [];
-    // Filter the resolved subjects list to only include ones taught in this class
-    return subjects.filter(s => cls.subjects.includes(s.name));
+    
+    // Filter the resolved subjects list
+    // cls.subjects might contain names OR IDs
+    return subjects.filter(s => 
+        cls.subjects.includes(s.name) || 
+        cls.subjects.includes(s.id)
+    );
   }, [selectedClassId, classes, subjects]);
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -260,6 +275,22 @@ export default function AssignmentWizard({ onClose, userId, onSuccess }: Assignm
             .insert(formattedQuestions);
             
           if (qError) throw qError;
+      }
+
+      // 4. Create Notification (if Published)
+      if (status === 'PUBLISHED') {
+          const className = classes.find(c => c.id === selectedClassId)?.name;
+          const subjectName = subjects.find(s => s.id === selectedSubjectId)?.name;
+
+          await supabase.from('notifications').insert([
+            {
+              type: 'info',
+              title: 'New Assignment',
+              message: `New ${subjectName} assignment for ${className}: ${title}`,
+              created_by: userId,
+              target_class_id: selectedClassId
+            },
+          ]);
       }
 
       if (onSuccess) onSuccess();

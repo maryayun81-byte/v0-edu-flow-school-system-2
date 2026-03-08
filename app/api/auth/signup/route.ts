@@ -33,26 +33,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create profile with role='teacher' to prevent default 'student' assignment
-    const { error: profileError } = await supabase.from('profiles').upsert({
-      id: authData.user.id,
-      full_name,
-      email,
-      role: 'teacher',
-      profile_completed: false,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }, {
-      onConflict: 'id'
-    });
+    // NOTE: Profile creation is now handled by the 'on_auth_user_created' database trigger.
+    // We can verify it exists if we want, but letting the trigger handle it 
+    // prevents RLS issues with the 'anon' key during signup.
+    
+    // We add a small delay or just proceed, as the trigger is synchronous in the transaction.
 
-    if (profileError) {
-      console.error('Profile creation error:', profileError);
-      return NextResponse.json(
-        { error: 'Account created but profile setup failed: ' + profileError.message },
-        { status: 500 }
-      );
-    }
+    return NextResponse.json(
+      { user: authData.user, message: 'Signup successful' },
+      { status: 200 }
+    );
 
     return NextResponse.json(
       { user: authData.user, message: 'Signup successful' },

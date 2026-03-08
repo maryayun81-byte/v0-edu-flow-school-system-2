@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/client';
 import { 
   Plus, Calendar, Wifi, WifiOff, FileText, Trash2, 
   Search, Filter, ExternalLink, Clock, Users, BookOpen
@@ -11,10 +11,7 @@ import { cn } from '@/lib/utils';
 import AssignmentWizard from './AssignmentWizard';
 import AssignmentGradingView from './AssignmentGradingView';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface ClassAssignmentsManagerProps {
   userId: string;

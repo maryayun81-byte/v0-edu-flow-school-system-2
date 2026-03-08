@@ -1,16 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { X, BookOpen, GraduationCap } from "lucide-react";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 const SUBJECTS = [
   "Mathematics", "English", "Kiswahili", "Biology", "Chemistry", "Physics",
@@ -75,39 +72,43 @@ export default function TeacherOnboardingModal({
 
     setSaving(true);
     try {
-      // Insert subject preferences
+      // Insert or Update subject preferences
       const preferences = selectedSubjects.map(subject => ({
         teacher_id: teacherId,
         subject,
-        preferred_classes: subjectClassPreferences[subject] || []
+        preferred_classes: subjectClassPreferences[subject] || [],
+        updated_at: new Date().toISOString()
       }));
 
       const { error: prefError } = await supabase
         .from("teacher_subject_preferences")
-        .insert(preferences);
+        .upsert(preferences, { onConflict: 'teacher_id,subject' });
 
       if (prefError) throw prefError;
 
       // Mark onboarding as completed
       const { error: profileError } = await supabase
         .from("profiles")
-        .update({ onboarding_completed: true })
+        .update({ 
+            onboarding_completed: true,
+            updated_at: new Date().toISOString()
+        })
         .eq("id", teacherId);
 
       if (profileError) throw profileError;
 
       onComplete();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error saving preferences:", error);
-      alert("Failed to save preferences. Please try again.");
+      alert(`Failed to save preferences: ${error.message || 'Unknown error'}. Please try again.`);
     } finally {
       setSaving(false);
     }
   }
 
   return (
-    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-card border border-border/50 rounded-2xl p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+      <div className="bg-card border border-border/50 rounded-2xl p-6 w-full max-w-2xl shadow-xl max-h-[90vh] overflow-y-auto pb-10 sm:pb-6">
         {/* Header */}
         <div className="mb-6">
           <div className="flex items-center gap-3 mb-2">
