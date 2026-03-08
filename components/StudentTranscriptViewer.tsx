@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import {
   Download,
   X,
@@ -12,13 +12,14 @@ import {
   Lock,
   ChevronDown,
   ChevronUp,
+  Brain,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { CognitiveCore } from "@/lib/ai/CognitiveCore";
+import { TrajectoryForecaster } from "@/lib/ai/TrajectoryForecaster";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Transcript {
   id: string;
@@ -73,11 +74,52 @@ export default function StudentTranscriptViewer({
   const [loading, setLoading] = useState(true);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [showSubjects, setShowSubjects] = useState(false);
+  const [aiInsight, setAiInsight] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     fetchTranscript();
     fetchSettings();
   }, [transcriptId]);
+
+  useEffect(() => {
+    if (transcript) {
+      generateAiInsight();
+    }
+  }, [transcript]);
+
+  async function generateAiInsight() {
+    if (!transcript) return;
+    setIsAnalyzing(true);
+    try {
+      const signals = await CognitiveCore.fetchStudentSignals(transcript.admission_number); // admission_number or student_id? Profiles table uses id.
+      // The transcript actually has student_id but let's re-verify the fetchTranscript logic.
+      // Lines 90-99 fetch transcript for student_id.
+      
+      // Let's use transcriptData.student_id if we had it, but we only have transcript object here.
+      // Wait, the Transcript interface (line 23) doesn't have student_id. I should add it or fetch by admission number if unique.
+      // Actually CognitiveCore.fetchStudentSignals takes studentId (UUID).
+      
+      const { data: profile } = await supabase.from('profiles').select('id').eq('admission_number', transcript.admission_number).single();
+      if (!profile) return;
+
+      const signalsData = await CognitiveCore.fetchStudentSignals(profile.id);
+      const trajectory = await TrajectoryForecaster.getTrajectoryMetrics(profile.id);
+      
+      const examSignals = {
+        ...signalsData,
+        academicPerformanceTrend: transcript.average_score / 100,
+      };
+
+      const fingerprint = CognitiveCore.computeBehavioralFingerprint(examSignals, trajectory);
+      const insight = await CognitiveCore.generateInsight(profile.id, 'academic', examSignals, fingerprint, 'student');
+      setAiInsight(insight);
+    } catch (error) {
+      console.error("Error generating AI insight for transcript:", error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   async function fetchSettings() {
     const { data } = await supabase.from("school_settings").select("*").single();
@@ -91,8 +133,8 @@ export default function StudentTranscriptViewer({
         .from("transcripts")
         .select(`
           *,
-          exams!inner(exam_name, academic_year, term, start_date, end_date),
-          profiles!inner(full_name, admission_number, form_class, curriculum_type)
+          exams(exam_name, academic_year, term, start_date, end_date),
+          profiles(full_name, admission_number, form_class, curriculum_type)
         `)
         .eq("id", transcriptId)
         .eq("status", "Published")
@@ -354,7 +396,26 @@ export default function StudentTranscriptViewer({
                )}
             </div>
 
-             {/* Admin Remarks Read-Only */}
+              {/* AI Academic Analysis */}
+              {(aiInsight || isAnalyzing) && (
+                <div className="bg-primary/5 border border-primary/20 rounded-xl p-5 shadow-sm">
+                   <h3 className="text-xs font-bold text-primary uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <Brain className="w-4 h-4" /> Academic Intelligence Analysis
+                   </h3>
+                   {isAnalyzing ? (
+                      <div className="flex items-center gap-2 py-2">
+                        <div className="w-3 h-3 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                        <p className="text-xs text-muted-foreground italic">Analyzing performance vectors...</p>
+                      </div>
+                   ) : (
+                      <p className="text-sm font-medium text-foreground italic leading-relaxed">
+                        "{aiInsight}"
+                      </p>
+                   )}
+                </div>
+              )}
+
+              {/* Admin Remarks Read-Only */}
              {transcript.admin_remarks && (
                 <div className="bg-amber-50/50 border border-amber-200/50 rounded-xl p-5 shadow-sm">
                    <h3 className="text-xs font-bold text-amber-600 uppercase tracking-wider mb-2 flex items-center gap-2">
@@ -561,14 +622,28 @@ export default function StudentTranscriptViewer({
               
               {/* FOOTER: REMARKS & SIGNATURES */}
               <div className={`grid grid-cols-5 gap-8 mt-auto pt-4 border-t ${pdfSafeBorder} border-opacity-30 ${pdfSafeText}`}>
-                 <div className="col-span-3">
-                    <p className="uppercase text-[10px] tracking-widest opacity-60 mb-2 font-bold">Director's Remarks</p>
-                    <div className={`p-3 bg-black/[0.03] rounded border ${pdfSafeBorder} border-opacity-20 min-h-[80px]`}>
-                      <p className="text-sm italic font-medium leading-relaxed">
-                        "{transcript.admin_remarks || "Excellent performance. Keep it up."}"
-                      </p>
-                    </div>
-                 </div>
+                  <div className="col-span-3 space-y-4">
+                     <div>
+                        <p className="uppercase text-[10px] tracking-widest opacity-60 mb-2 font-bold">Director's Remarks</p>
+                        <div className={`p-3 bg-black/[0.03] rounded border ${pdfSafeBorder} border-opacity-20 min-h-[60px]`}>
+                          <p className="text-sm italic font-medium leading-relaxed">
+                            "{transcript.admin_remarks || "Excellent performance. Keep it up."}"
+                          </p>
+                        </div>
+                     </div>
+
+                     {aiInsight && (
+                        <div className={`p-4 bg-primary/5 rounded border-l-4 border-primary/30 relative overflow-hidden ${pdfSafeText}`}>
+                           <div className="absolute top-0 right-0 p-2 opacity-[0.05]">
+                              <Brain className="w-12 h-12" />
+                           </div>
+                           <h4 className="text-[9px] font-black uppercase tracking-widest text-primary mb-1">Academic Intelligence Analysis</h4>
+                           <p className="text-xs italic font-medium leading-relaxed opacity-90">
+                              "{aiInsight}"
+                           </p>
+                        </div>
+                     )}
+                  </div>
                  
                  <div className="col-span-2 flex flex-col justify-end items-center">
                     <div className="relative w-full h-24 flex items-end justify-center">

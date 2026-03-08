@@ -279,7 +279,7 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
             <button
               onClick={generateAiInsights}
               disabled={isGeneratingAi}
-              className="px-4 py-2 bg-slate-900 border border-border/50 hover:border-primary/50 text-white text-[10px] font-black uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 flex items-center gap-2"
+              className="px-4 py-2 bg-foreground text-background border border-border/50 hover:opacity-90 text-[10px] font-black uppercase tracking-widest rounded-xl transition-all disabled:opacity-50 flex items-center gap-2"
             >
               {isGeneratingAi ? (
                 <>
@@ -297,7 +297,7 @@ export default function StudentAttendanceSummary({ studentId }: { studentId: str
           
           {aiInsight ? (
             <div className="bg-card/30 backdrop-blur-sm rounded-2xl p-5 border border-primary/10 animate-in fade-in slide-in-from-bottom-2 duration-500">
-              <p className="text-sm leading-relaxed text-slate-300 font-medium italic">
+              <p className="text-sm leading-relaxed text-foreground/80 font-medium italic">
                 {aiInsight}
               </p>
             </div>

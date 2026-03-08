@@ -1,94 +1,84 @@
 -- ============================================================
--- COMPREHENSIVE RLS RESET & FIX
--- Run this in Supabase SQL Editor to resolve hangs and permission issues
+-- MASTER RLS FIX — Run this entire script in Supabase SQL Editor
+-- Fixes: transcripts visibility, quiz auth, behavioral_trajectories 403
 -- ============================================================
 
--- 1. Ensure Robust is_admin() Function (SECURITY DEFINER)
--- Marked as SECURITY DEFINER to bypass RLS when checking roles.
-CREATE OR REPLACE FUNCTION public.is_admin()
-RETURNS BOOLEAN
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  current_role TEXT;
-BEGIN
-  SELECT role INTO current_role FROM public.profiles WHERE id = auth.uid();
-  RETURN (current_role = 'admin');
-END;
-$$;
+-- ─── 1. EXAMS: Allow students to see closed/finalized exams ─────────────────
+-- (Needed for transcript join to work)
+DROP POLICY IF EXISTS "Students can view active exams" ON exams;
+DROP POLICY IF EXISTS "Students can view active and closed exams" ON exams;
+CREATE POLICY "Students can view active and closed exams"
+  ON exams FOR SELECT
+  USING (status IN ('Active', 'Closed', 'Finalized'));
 
--- 2. CLEAR and RESET Profiles Policies
--- We drop all existing policies to ensure no conflicts or recursion hidden in old policies.
-DO $$
-DECLARE
-    pol RECORD;
-BEGIN
-    FOR pol IN (SELECT policyname FROM pg_policies WHERE tablename = 'profiles' AND schemaname = 'public') LOOP
-        EXECUTE format('DROP POLICY IF EXISTS %I ON public.profiles', pol.policyname);
-    END LOOP;
-END $$;
+-- ─── 2. TRANSCRIPTS: Students see own published transcripts ─────────────────
+DROP POLICY IF EXISTS "Students can view their published transcripts" ON transcripts;
+DROP POLICY IF EXISTS "Students can view own transcripts" ON transcripts;
+CREATE POLICY "Students can view own published transcripts"
+  ON transcripts FOR SELECT
+  USING (student_id = auth.uid() AND status = 'Published');
 
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+-- ─── 3. BEHAVIORAL TRAJECTORIES: Allow student INSERT/UPSERT ────────────────
+-- This is the cause of the 403 on POST /rest/v1/behavioral_trajectories
+DROP POLICY IF EXISTS "Privileged roles can read trajectories" ON behavioral_trajectories;
+DROP POLICY IF EXISTS "Students can read own trajectories" ON behavioral_trajectories;
+DROP POLICY IF EXISTS "Students can insert own trajectories" ON behavioral_trajectories;
 
--- Policy: Everyone authenticated can see ALL profiles (simplest, prevents recursion, allows teachers to see students)
-CREATE POLICY "profiles_select_authenticated" ON public.profiles
-  FOR SELECT TO authenticated USING (TRUE);
+-- Allow students to read their own trajectory snapshots
+CREATE POLICY "Students can read own trajectories"
+  ON behavioral_trajectories FOR SELECT
+  USING (student_id = auth.uid() OR 
+         (SELECT role FROM profiles WHERE id = auth.uid()) IN ('admin', 'teacher'));
 
--- Policy: Users can update their own profile
-CREATE POLICY "profiles_update_own" ON public.profiles
-  FOR UPDATE TO authenticated USING (id = auth.uid());
+-- Allow students to write their own trajectory snapshots (for AI engine)
+CREATE POLICY "Students can insert own trajectories"
+  ON behavioral_trajectories FOR INSERT
+  WITH CHECK (student_id = auth.uid());
 
--- Policy: Admins can update any profile (uses is_admin() which bypasses RLS)
-CREATE POLICY "profiles_update_admin" ON public.profiles
-  FOR UPDATE TO authenticated USING (public.is_admin());
+-- Allow the upsert (update) path used by TrajectoryForecaster.recordTrajectory
+CREATE POLICY "Students can update own trajectories"
+  ON behavioral_trajectories FOR UPDATE
+  USING (student_id = auth.uid());
 
--- 3. RESET Class Teachers Policies
-ALTER TABLE public.class_teachers ENABLE ROW LEVEL SECURITY;
-DROP POLICY IF EXISTS "class_teachers_select_policy" ON public.class_teachers;
-DROP POLICY IF EXISTS "class_teachers_admin_policy" ON public.class_teachers;
-DROP POLICY IF EXISTS "Admins can manage class teachers" ON public.class_teachers;
-DROP POLICY IF EXISTS "All can view class teachers" ON public.class_teachers;
+-- ─── 4. INTELLIGENCE INSIGHTS: Allow read + write for cache ─────────────────
+DROP POLICY IF EXISTS "Admins full access intelligence_insights" ON intelligence_insights;
+DROP POLICY IF EXISTS "Users read own intelligence_insights" ON intelligence_insights;
 
-CREATE POLICY "class_teachers_select_policy" ON public.class_teachers
-  FOR SELECT TO authenticated USING (TRUE);
+CREATE POLICY "Admins full access intelligence_insights" 
+  ON intelligence_insights FOR ALL
+  USING (EXISTS (SELECT 1 FROM profiles WHERE id = auth.uid() AND role = 'admin'));
 
-CREATE POLICY "class_teachers_admin_policy" ON public.class_teachers
-  FOR ALL TO authenticated
-  USING (public.is_admin())
-  WITH CHECK (public.is_admin());
+CREATE POLICY "Students can read and write own insights"
+  ON intelligence_insights FOR ALL
+  USING (entity_id = auth.uid())
+  WITH CHECK (entity_id = auth.uid());
 
--- 4. ENSURE Attendance Tables are usable
--- Attendance SELECT
-DROP POLICY IF EXISTS "Students see own attendance" ON public.attendance;
-DROP POLICY IF EXISTS "Admins can manage all attendance" ON public.attendance;
-CREATE POLICY "attendance_select_policy" ON public.attendance
-  FOR SELECT TO authenticated
+-- ─── 5. QUIZ ATTEMPTS: Allow students to insert/update their own attempts ────
+-- (Some Supabase setups are missing this policy)
+DROP POLICY IF EXISTS "Students can manage own quiz attempts" ON quiz_attempts;
+CREATE POLICY "Students can manage own quiz attempts"
+  ON quiz_attempts FOR ALL
+  USING (student_id = auth.uid())
+  WITH CHECK (student_id = auth.uid());
+
+-- ─── 6. SUBMISSION_ANSWERS: Students can insert their own answers ────────────
+DROP POLICY IF EXISTS "Students can manage own submission answers" ON submission_answers;
+CREATE POLICY "Students can manage own submission answers"
+  ON submission_answers FOR ALL
   USING (
-    student_id = auth.uid() 
-    OR EXISTS (SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role IN ('admin', 'teacher'))
-  );
-
--- Attendance INSERT (for teachers)
-DROP POLICY IF EXISTS "Class teachers can insert attendance" ON public.attendance;
-CREATE POLICY "attendance_insert_teacher_policy" ON public.attendance
-  FOR INSERT TO authenticated
+    submission_id IN (
+      SELECT id FROM student_submissions WHERE student_id = auth.uid()
+    )
+  )
   WITH CHECK (
-    marked_by = auth.uid() AND
-    EXISTS (
-      SELECT 1 FROM public.class_teachers ct
-      WHERE ct.teacher_id = auth.uid() AND ct.class_id = attendance.class_id
+    submission_id IN (
+      SELECT id FROM student_submissions WHERE student_id = auth.uid()
     )
   );
 
--- Attendance ADMIN
-CREATE POLICY "attendance_admin_all" ON public.attendance
-  FOR ALL TO authenticated USING (public.is_admin());
-
--- 5. FINAL: Grant permissions to roles just in case
-GRANT ALL ON public.profiles TO authenticated;
-GRANT ALL ON public.class_teachers TO authenticated;
-GRANT ALL ON public.attendance TO authenticated;
-GRANT ALL ON public.tuition_events TO authenticated;
-GRANT ALL ON public.event_calendar TO authenticated;
+-- ─── 7. STUDENT SUBMISSIONS: Students can insert/read own submissions ─────────
+DROP POLICY IF EXISTS "Students can manage own submissions" ON student_submissions;
+CREATE POLICY "Students can manage own submissions"
+  ON student_submissions FOR ALL
+  USING (student_id = auth.uid())
+  WITH CHECK (student_id = auth.uid());

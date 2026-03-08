@@ -31,27 +31,17 @@ export async function POST(req: Request) {
       }
     }
 
-    // 2. Generate New Insight using the Intelligent Engine
+    // 2. Generate New Insight using the Intelligent Engine (Powered by CCIC)
     const result = await IntelligentEngine.process(type, data, context);
     
-    // Ensure the output matches the required JSON format for the premium dashboard
-    const structuredResponse = {
-      student_id: context.studentId || "N/A",
-      attendance_insight: result.insight,
-      attendance_risk_score: result.attendance_risk_score || 0,
-      payment_insight: result.payment_insight || "Finance data stable.",
-      payment_risk_score: result.payment_risk_score || 0,
-      suggested_action: result.suggested_action || "Continue monitoring.",
-      insight: result.insight // Legacy compatibility
-    };
-
     // 3. Update Cache
+    // We store the full structured result to avoid re-calculating indices
     const { error: upsertError } = await supabase
       .from("ai_insights")
       .upsert({
         type,
         context_id: contextId,
-        insight: JSON.stringify(structuredResponse),
+        insight: JSON.stringify(result),
         data_hash: dataHash,
         updated_at: new Date().toISOString()
       }, { onConflict: "type,context_id" });
@@ -60,7 +50,7 @@ export async function POST(req: Request) {
       console.error("[AI Cache Update Error]", upsertError);
     }
 
-    return NextResponse.json({ ...structuredResponse, cached: false });
+    return NextResponse.json({ ...result, cached: false });
   } catch (error: any) {
     console.error("Intelligent Engine Error:", error);
     return NextResponse.json({ error: error.message || "Failed to generate intelligent insights" }, { status: 500 });

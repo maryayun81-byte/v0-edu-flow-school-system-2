@@ -284,6 +284,22 @@ export default function AssignmentOnlinePlayer({
       );
   }
 
+  if (questions.length === 0) {
+      return (
+          <div className="max-w-xl mx-auto text-center py-20 bg-slate-800/30 rounded-3xl border border-slate-700/50">
+              <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+              <h2 className="text-xl font-bold text-white mb-2">No Questions Found</h2>
+              <p className="text-slate-400 mb-6 px-8">This assignment does not have any questions configured. Please contact your teacher.</p>
+              <button 
+                  onClick={onComplete}
+                  className="px-6 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg transition-colors"
+              >
+                  Back to Dashboard
+              </button>
+          </div>
+      );
+  }
+
   const currentQ = questions[currentQIndex];
   const progress = ((currentQIndex + 1) / questions.length) * 100;
   

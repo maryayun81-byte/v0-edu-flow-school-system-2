@@ -1,15 +1,14 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
-import { Trophy, CheckCircle, ChevronRight } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { Trophy, CheckCircle, ChevronRight, Brain, Sparkles, TrendingUp, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
+import { CognitiveCore } from "@/lib/ai/CognitiveCore";
+import { TrajectoryForecaster } from "@/lib/ai/TrajectoryForecaster";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface StudentResultsProps {
   studentId: string;
@@ -20,10 +19,68 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
   const [filters, setFilters] = useState({ year: "", term: "", exam: "" });
   const [loading, setLoading] = useState(true);
+  const [overallInsight, setOverallInsight] = useState<string | null>(null);
+  const [examSpecificInsight, setExamSpecificInsight] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
   useEffect(() => {
     fetchTranscripts();
+    loadOverallInsights();
   }, [studentId]);
+
+  async function loadOverallInsights() {
+    try {
+      // Request only 1 domain to display 1 consolidated insight
+      const insights = await CognitiveCore.getInsightsForDashboard(studentId, 'student', ['success']);
+      if (insights.length > 0) {
+        setOverallInsight(insights[0].insight_text);
+      }
+    } catch (error) {
+      console.error("Error loading overall insights:", error);
+    }
+  }
+
+  useEffect(() => {
+    if (transcripts.length > 0) {
+      generateExamSpecificInsight();
+    }
+  }, [filters, transcripts]);
+
+  async function generateExamSpecificInsight() {
+    // If we have a filtered set of transcripts, pick the primary one to analyze
+    const activeTranscript = filteredTranscripts[0] || transcripts[0];
+    if (!activeTranscript) return;
+
+    setIsAnalyzing(true);
+    try {
+      // Mocking behavioral signals for the specific exam context
+      // In a real scenario, fetchStudentSignals might take an optional exam_id
+      const signals = await CognitiveCore.fetchStudentSignals(studentId);
+      
+      // Fine-tune signals based on this specific transcript's performance
+      const examSignals = {
+        ...signals,
+        attendanceRate: signals.attendanceRate, // keep base
+        academicPerformanceTrend: activeTranscript.average_score / 100,
+      };
+
+      const trajectory = await TrajectoryForecaster.getTrajectoryMetrics(studentId);
+      const fingerprint = CognitiveCore.computeBehavioralFingerprint(examSignals, trajectory);
+      
+      const insight = await CognitiveCore.generateInsight(
+        studentId, 
+        'academic', 
+        examSignals, 
+        fingerprint, 
+        'student'
+      );
+      setExamSpecificInsight(insight);
+    } catch (error) {
+      console.error("Error generating exam insight:", error);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }
 
   async function fetchTranscripts() {
     setLoading(true);
@@ -31,7 +88,7 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
       .from("transcripts")
       .select(`
         *,
-        exams!inner(exam_name, academic_year, term, start_date, end_date)
+        exams(exam_name, academic_year, term, start_date, end_date)
       `)
       .eq("student_id", studentId)
       .eq("status", "Published")
@@ -46,7 +103,8 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
   }
 
   const filteredTranscripts = transcripts.filter((t: any) => {
-    if (filters.year && t.exams.academic_year.toString() !== filters.year) return false;
+    if (!t.exams) return false;
+    if (filters.year && t.exams.academic_year?.toString() !== filters.year) return false;
     if (filters.term && t.exams.term !== filters.term) return false;
     if (filters.exam && t.exams.exam_name !== filters.exam) return false;
     return true;
@@ -85,6 +143,51 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
         </div>
       </div>
 
+      {/* AI Performance Insight */}
+      {overallInsight && (
+        <div className="relative overflow-hidden bg-card rounded-2xl border border-border/50 p-6 shadow-sm group">
+          <div className="absolute -top-12 -right-12 w-48 h-48 bg-primary/10 rounded-full blur-3xl group-hover:bg-primary/20 transition-all duration-700" />
+          <div className="relative z-10 flex items-start gap-4">
+            <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center shrink-0">
+              <Brain className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h3 className="font-bold text-foreground mb-1">Core Performance Insight</h3>
+              <p className="text-xs text-muted-foreground mb-3">AI-Powered Behavioral Analysis</p>
+              <div className="flex items-start gap-3">
+                <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                <p className="text-sm leading-relaxed text-foreground/90">{overallInsight}</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Exam Specific Analysis */}
+      {(examSpecificInsight || isAnalyzing) && (
+        <div className="bg-gradient-to-br from-accent/10 to-transparent border border-accent/20 rounded-2xl p-6 relative overflow-hidden">
+           <div className="absolute top-0 right-0 p-4 opacity-10">
+              <TrendingUp className="w-24 h-24" />
+           </div>
+           <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-3">
+                <Info className="w-4 h-4 text-accent" />
+                <span className="text-[10px] font-black uppercase tracking-widest text-accent">Exam Performance Analysis</span>
+              </div>
+              {isAnalyzing ? (
+                <div className="flex items-center gap-3 py-2">
+                   <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
+                   <p className="text-sm text-muted-foreground italic">Synthesizing exam data...</p>
+                </div>
+              ) : (
+                <p className="text-sm font-medium text-foreground italic leading-relaxed">
+                  "{examSpecificInsight}"
+                </p>
+              )}
+           </div>
+        </div>
+      )}
+
       {/* Filters */}
       {transcripts.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -96,7 +199,7 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
               className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
             >
               <option value="">All Years</option>
-              {Array.from(new Set(transcripts.map((t: any) => t.exams.academic_year))).map((year) => (
+              {Array.from(new Set(transcripts.filter(t => t.exams?.academic_year).map((t: any) => t.exams.academic_year))).map((year) => (
                 <option key={year} value={year}>{year}</option>
               ))}
             </select>
@@ -109,7 +212,7 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
               className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
             >
               <option value="">All Terms</option>
-              {Array.from(new Set(transcripts.map((t: any) => t.exams.term))).map((term) => (
+              {Array.from(new Set(transcripts.filter(t => t.exams?.term).map((t: any) => t.exams.term))).map((term) => (
                 <option key={term} value={term}>{term}</option>
               ))}
             </select>
@@ -122,7 +225,7 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
               className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
             >
               <option value="">All Exams</option>
-              {Array.from(new Set(transcripts.map((t: any) => t.exams.exam_name))).map((exam) => (
+              {Array.from(new Set(transcripts.filter(t => t.exams?.exam_name).map((t: any) => t.exams.exam_name))).map((exam) => (
                 <option key={exam} value={exam}>{exam}</option>
               ))}
             </select>

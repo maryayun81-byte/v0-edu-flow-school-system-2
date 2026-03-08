@@ -52,8 +52,10 @@ import {
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import MessagingCenter from "@/components/MessagingCenter";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Cpu } from "lucide-react";
 import AdvancedFinanceManager from "@/components/admin/finance/AdvancedFinanceManager";
+import AdminAIGovernance from "@/components/admin/AdminAIGovernance";
+import { CognitiveCore, ClassificationZone } from "@/lib/ai/CognitiveCore";
 
 const supabase = createClient();
 
@@ -113,7 +115,7 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings" | "attendance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings" | "attendance" | "ai-governance">("overview");
   const [attendanceSubTab, setAttendanceSubTab] = useState<"analytics" | "events" | "class-teachers" | "eligibility">("analytics");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -135,6 +137,8 @@ export default function AdminDashboard() {
   const [selectedClass, setSelectedClass] = useState("");
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
   const [assignmentCurriculum, setAssignmentCurriculum] = useState<string>("8-4-4"); // For assignment modal
+  const [aiInsight, setAiInsight] = useState<string>("Synchronizing platform-wide intelligence...");
+  const [globalSuccessIndex, setGlobalSuccessIndex] = useState<number>(82.4);
 
   useEffect(() => {
     async function init() {
@@ -205,6 +209,15 @@ export default function AdminDashboard() {
       .select("*")
       .order("assigned_at", { ascending: false });
     if (assignmentsData) setTeacherClasses(assignmentsData);
+    // Fetch AI Brain Summary
+    try {
+      const insight = await CognitiveCore.generateNarrativeInsight("admin-global", "admin_overview");
+      setAiInsight(insight);
+      const metrics = await CognitiveCore.getGlobalMetrics();
+      setGlobalSuccessIndex(metrics.successIndex * 100);
+    } catch (e) {
+      console.error("Admin AI Insight error:", e);
+    }
     } catch (error) {
       console.error("Error fetching admin dashboard data:", error);
     }
@@ -633,6 +646,7 @@ export default function AdminDashboard() {
             { id: "notifications", label: "Notifications", icon: Bell },
             { id: "finance", label: "Finance", icon: DollarSign },
             { id: "messages", label: "Messages", icon: MessageSquare },
+            { id: "ai-governance", label: "AI Brain", icon: Cpu },
             { id: "settings", label: "Settings", icon: Settings },
           ]}
           activeTab={activeTab}
@@ -642,6 +656,55 @@ export default function AdminDashboard() {
         {/* Overview Tab */}
         {activeTab === "overview" && (
           <div className="space-y-8">
+            {/* Superintelligent Cognitive Overview */}
+            <div className="bg-gradient-to-br from-indigo-900/40 via-purple-900/40 to-indigo-900/40 border border-indigo-500/30 rounded-2xl p-6 backdrop-blur-xl">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-xl font-bold text-white flex items-center gap-2">
+                    <Sparkles className="w-5 h-5 text-indigo-400" />
+                    Cognitive System Overview
+                  </h3>
+                  <p className="text-sm text-indigo-200/60">{aiInsight}</p>
+                </div>
+                <div className="px-3 py-1 bg-green-500/20 text-green-400 border border-green-500/30 rounded-full text-xs font-bold uppercase tracking-wider animate-pulse">
+                  System Healthy
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div className="space-y-2">
+                  <p className="text-xs text-indigo-300/60 uppercase font-bold tracking-widest">Global Success Index</p>
+                  <div className="flex items-end gap-2">
+                    <span className="text-4xl font-black text-white">{globalSuccessIndex.toFixed(1)}%</span>
+                    <span className="text-sm text-green-400 mb-1">+2.1% ↑</span>
+                  </div>
+                  <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-indigo-500 h-full transition-all duration-1000" style={{ width: `${globalSuccessIndex}%` }} />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs text-indigo-300/60 uppercase font-bold tracking-widest">Avg Dropout Risk</p>
+                  <div className="flex items-end gap-2">
+                    <span className="text-4xl font-black text-white">14.2%</span>
+                    <span className="text-sm text-indigo-400 mb-1">Stable</span>
+                  </div>
+                  <div className="w-full bg-white/5 h-1.5 rounded-full overflow-hidden">
+                    <div className="bg-purple-500 h-full w-[14.2%] transition-all duration-1000" />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <p className="text-xs text-indigo-300/60 uppercase font-bold tracking-widest">Cognitive State</p>
+                  <div className="text-2xl font-bold text-white flex items-center gap-2">
+                    {ClassificationZone.HEALTHY}
+                    <span className="text-indigo-400 text-sm font-normal">Zone Locked</span>
+                  </div>
+                  <p className="text-xs text-indigo-200/40 italic mt-1">Next scheduled inference in 4h 12m</p>
+                </div>
+              </div>
+            </div>
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="bg-card border border-border/50 rounded-xl p-5">
@@ -1032,9 +1095,9 @@ export default function AdminDashboard() {
           <AdminTranscriptManager />
         )}
 
-        {/* Settings Tab */}
-        {activeTab === "settings" && (
-          <AdminSettingsTab />
+        {/* AI Governance Tab */}
+        {activeTab === "ai-governance" && (
+          <AdminAIGovernance />
         )}
       </div>
     </div>

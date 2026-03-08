@@ -131,7 +131,7 @@ export default function AttendanceOverviewCard({
   };
 
   return (
-    <div className="group relative bg-card/60 backdrop-blur-3xl border border-border/50 rounded-2xl p-6 transition-all duration-700 hover:border-primary/40 hover:shadow-[0_20px_50px_rgba(0,0,0,0.2)] hover:shadow-primary/5 overflow-hidden">
+    <div className="group relative bg-card backdrop-blur-3xl border border-border/50 rounded-[2.5rem] p-8 transition-all duration-700 hover:border-primary/40 hover:shadow-[0_40px_80px_rgba(0,0,0,0.4)] hover:shadow-primary/5 overflow-hidden">
       {/* Premium background effects */}
       <div className="absolute -top-24 -right-24 w-64 h-64 bg-primary/5 rounded-full blur-[80px] group-hover:bg-primary/10 transition-all duration-700" />
       <div className="absolute -bottom-24 -left-24 w-64 h-64 bg-accent/5 rounded-full blur-[80px] group-hover:bg-accent/10 transition-all duration-700" />
@@ -140,15 +140,15 @@ export default function AttendanceOverviewCard({
       <div className="flex items-start justify-between mb-8 relative z-10">
         <div>
           <div className="flex items-center gap-3 mb-1">
-            <h3 className="text-2xl font-bold text-foreground tracking-tight">Attendance</h3>
+            <h3 className="text-2xl font-black text-foreground tracking-tight uppercase">Presence Sync</h3>
             {stats.streak >= 2 && (
-              <div className="flex items-center gap-1.5 bg-orange-500/10 text-orange-500 px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase animate-pulse">
+              <div className="flex items-center gap-1.5 bg-orange-500/20 text-orange-400 px-3 py-1 rounded-full text-[10px] font-black tracking-widest uppercase border border-orange-500/20">
                 <Flame className="w-3.5 h-3.5 fill-orange-500/20" />
                 <span>{stats.streak} DAY STREAK</span>
               </div>
             )}
           </div>
-          <p className="text-sm text-muted-foreground font-medium">Your performance this term</p>
+          <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest">Behavioral Reliability Matrix</p>
         </div>
         <button 
           onClick={onViewFull}
@@ -187,8 +187,8 @@ export default function AttendanceOverviewCard({
                />
              </svg>
              <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-               <span className="text-4xl font-black text-foreground drop-shadow-sm">{stats.percentage}%</span>
-               <span className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-[0.2em] mt-1">Consistency</span>
+               <span className="text-5xl font-black text-foreground drop-shadow-2xl">{stats.percentage}%</span>
+               <span className="text-[10px] font-black text-muted-foreground uppercase tracking-[0.2em] mt-1">Stability</span>
              </div>
           </div>
         </div>
@@ -258,26 +258,18 @@ export default function AttendanceOverviewCard({
          </div>
       </div>
 
-      {/* AI Insight Section */}
-      <div className="relative bg-gradient-to-br from-primary/10 via-accent/5 to-primary/5 rounded-2xl p-5 border border-primary/20 shadow-inner group/insight overflow-hidden">
-        {/* Animated background lines */}
-        <div className="absolute inset-0 opacity-10 pointer-events-none">
-          <svg className="w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
-             <path d="M0,50 Q25,30 50,50 T100,50" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-primary animate-pulse" />
-             <path d="M0,60 Q25,40 50,60 T100,60" fill="none" stroke="currentColor" strokeWidth="0.5" className="text-accent animate-pulse delay-700" />
-          </svg>
-        </div>
-        
-        <div className="flex gap-4 items-start relative z-10">
-          <div className="w-10 h-10 rounded-xl bg-primary/20 flex items-center justify-center shrink-0 shadow-lg shadow-primary/10 group-hover/insight:scale-110 transition-transform duration-500">
-             <Brain className="w-5 h-5 text-primary" />
+    {/* AI Insight Section */}
+      <div className="relative bg-muted/30 rounded-[2rem] p-6 border border-border/50 shadow-inner group/insight overflow-hidden">
+        <div className="flex gap-5 items-start relative z-10">
+          <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center shrink-0 shadow-lg shadow-primary/10 group-hover/insight:scale-110 transition-transform duration-500">
+             <Brain className="w-6 h-6 text-primary" />
           </div>
           <div className="flex-1">
-            <div className="flex items-center gap-2 mb-1.5">
-              <div className="text-[10px] font-black text-primary uppercase tracking-[0.2em]">SIRIUS AI INSIGHT</div>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="text-[10px] font-black text-primary uppercase tracking-[0.3em]">Neural Insights</div>
               <div className="flex h-1.5 w-1.5 rounded-full bg-primary animate-pulse"></div>
             </div>
-            <p className="text-sm text-foreground/90 font-medium italic leading-relaxed tracking-tight group-hover/insight:text-foreground transition-colors">
+            <p className="text-base text-foreground/80 font-medium italic leading-relaxed tracking-tight group-hover/insight:text-foreground transition-colors">
               "{stats.insight}"
             </p>
           </div>

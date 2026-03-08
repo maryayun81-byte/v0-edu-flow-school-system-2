@@ -2,13 +2,10 @@
 
 import { useState, useEffect } from 'react';
 import { Calendar, Clock, MapPin, BookOpen, User, LayoutGrid, List, Filter } from 'lucide-react';
-import { useTimetable } from '@/hooks/useTimetable';
-import { createClient } from '@supabase/supabase-js';
+import { useTimetable, TimetableSession } from '@/hooks/useTimetable';
+import { createClient } from '@/lib/supabase/client';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
@@ -32,23 +29,36 @@ export default function StudentTimetablePage() {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
+        // 1. Fetch Profile for general info
         const { data: profile } = await supabase
           .from('profiles')
-          .select('form_class, subjects')
+          .select('subjects')
           .eq('id', user.id)
           .single();
 
-        if (profile) {
-          // Get class ID from form_class name
-          const { data: classData } = await supabase
-            .from('classes')
-            .select('id')
-            .eq('name', profile.form_class)
-            .single();
+        // 2. Fetch Class Enrollment (Robust ID-based)
+        const { data: enrollments } = await supabase
+          .from('student_classes')
+          .select('class_id')
+          .eq('student_id', user.id)
+          .limit(1);
 
-          if (classData) setClassId(classData.id);
-          setStudentSubjects(profile.subjects || []);
+        if (enrollments?.[0]) {
+          setClassId(enrollments[0].class_id);
         }
+
+        // 3. Fetch Subject Enrollment
+        const { data: subjectData } = await supabase
+          .from('student_subjects')
+          .select('subject_name')
+          .eq('student_id', user.id);
+        
+        const combinedSubjects = [
+          ...(profile?.subjects || []),
+          ...(subjectData?.map((s: { subject_name: string }) => s.subject_name) || [])
+        ];
+        
+        setStudentSubjects(combinedSubjects);
       } catch (error) {
         console.error('Error fetching student data:', error);
       } finally {
@@ -60,12 +70,12 @@ export default function StudentTimetablePage() {
   }, []);
 
   const filteredSessions = filterMode === 'my_subjects'
-    ? sessions.filter(s => studentSubjects.includes(s.subject))
+    ? sessions.filter((s: TimetableSession) => studentSubjects.includes(s.subject))
     : sessions;
 
   const getSessionsForDay = (day: string) => {
     return filteredSessions
-      .filter(s => s.day_of_week === day)
+      .filter((s: TimetableSession) => s.day_of_week === day)
       .sort((a, b) => a.start_time.localeCompare(b.start_time));
   };
 

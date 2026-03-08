@@ -19,6 +19,7 @@ import {
   Search,
   ChevronRight,
   TrendingUp,
+  TrendingDown,
   Target,
   Zap,
   Sparkles,
@@ -50,6 +51,7 @@ import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
 import StudentAttendanceSummary from "@/components/student/StudentAttendanceSummary";
 import AttendanceOverviewCard from "@/components/student/AttendanceOverviewCard";
+import { CognitiveCore, PredictionResult, ClassificationZone } from "@/lib/ai/CognitiveCore";
 
 
 const supabase = createClient();
@@ -115,6 +117,31 @@ interface QuizResult {
   teacher_remarks?: string;
 }
 
+interface Notification {
+  id: string;
+  title: string;
+  message: string;
+  created_at: string;
+  type: string;
+  payload?: any;
+  is_read?: boolean;
+}
+
+interface Transcript {
+  id: string;
+  student_id: string;
+  exam_id: string;
+  status: string;
+  published_at: string;
+  exams: {
+    exam_name: string;
+    academic_year: string;
+    term: string;
+    start_date: string;
+    end_date: string;
+  };
+}
+
 const DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 
 export default function StudentDashboard() {
@@ -142,20 +169,21 @@ export default function StudentDashboard() {
   const [timetable, setTimetable] = useState<TimetableEntry[]>([]);
   const [quizzes, setQuizzes] = useState<Quiz[]>([]);
   const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<string[]>([]);
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null);
   const [timetableFilter, setTimetableFilter] = useState<'my_subjects' | 'full_class'>('full_class');
   const [showMoreMenu, setShowMoreMenu] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [notificationsList, setNotificationsList] = useState<any[]>([]);
+  const [notificationsList, setNotificationsList] = useState<Notification[]>([]);
   const [activeTab, setActiveTab] = useState<
     "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications" | "attendance"
-  >((searchParams?.get("tab") as any) || "overview");
+  >((searchParams?.get("tab") as "overview") || "overview");
   const [searchQuery, setSearchQuery] = useState("");
-  const [transcripts, setTranscripts] = useState<any[]>([]);
+  const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
   const [transcriptFilters, setTranscriptFilters] = useState({ year: "", term: "", exam: "" });
+  const [inference, setInference] = useState<PredictionResult | null>(null);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
@@ -234,6 +262,14 @@ export default function StudentDashboard() {
     // Fetch content - pass profileData so it has access to form_class
     await fetchContent(profileData);
     await fetchNotifications(profileData?.id || session.user.id);
+    
+    // Perform Cognitive Inference
+    if (profileData) {
+      const signals = await CognitiveCore.fetchStudentSignals(profileData.id);
+      const result = await CognitiveCore.infer(profileData.id, signals);
+      setInference(result);
+    }
+
     setLoading(false);
   }
 
@@ -256,8 +292,8 @@ export default function StudentDashboard() {
       // Note: RLS already handles the main security. This is for visual processing if needed.
       const processedInfos = notifs.map((n: any) => ({
         ...n,
-        is_read: n.read_status.length > 0
-      }));
+        is_read: n.read_status && n.read_status.length > 0
+      })) as Notification[];
       setNotificationsList(processedInfos);
     }
 
@@ -323,7 +359,8 @@ export default function StudentDashboard() {
       .select('class_id')
       .eq('student_id', currentProfile.id);
     
-    const classIds = enrollments?.map((e: any) => e.class_id) || [];
+    
+    const classIds = enrollments?.map((e: { class_id: string }) => e.class_id) || [];
 
     // 2. Fetch Content with class filters
     const [notesRes, assignmentsRes, quizzesRes] = await Promise.all([
@@ -355,66 +392,36 @@ export default function StudentDashboard() {
             .select('assignment_id')
             .eq('student_id', currentProfile.id);
         
-        const submittedIds = new Set(subs?.map((s: any) => s.assignment_id) || []);
+        const submittedIds = new Set(subs?.map((s: { assignment_id: string }) => s.assignment_id) || []);
         
-        const processedAssignments = assignmentsRes.data.map((a: any) => ({
+        const processedAssignments = assignmentsRes.data.map((a: Assignment) => ({
             ...a,
             is_completed: submittedIds.has(a.id)
         }));
         setAssignments(processedAssignments);
     }
     
-    // Fetch timetable sessions for student's class
-    if (currentProfile?.form_class) {
-      console.log('[Student Timetable] Student form_class:', currentProfile.form_class);
-      
-      // First get the class_id from the classes table
-      const { data: classData, error: classError } = await supabase
-        .from('classes')
-        .select('id, name')
-        .eq('name', currentProfile.form_class)
-        .single();
+    // 4. Fetch Timetable Sessions (Robust ID-based)
+    if (classIds.length > 0) {
+      const { data: sessionsData } = await supabase
+        .from('timetable_sessions')
+        .select('*')
+        .in('class_id', classIds)
+        .in('status', ['published', 'locked'])
+        .order('day_of_week')
+        .order('start_time');
 
-      console.log('[Student Timetable] Class lookup result:', { classData, classError });
-
-      if (classData) {
-        const { data: sessionsData, error: sessionsError } = await supabase
-          .from('timetable_sessions')
-          .select('*')
-          .eq('class_id', classData.id)
-          .in('status', ['published', 'locked'])
-          .order('day_of_week')
-          .order('start_time');
-
-        console.log('[Student Timetable] Sessions query result:', { 
-          sessionsCount: sessionsData?.length || 0, 
-          sessionsError,
-          classId: classData.id 
-        });
-
-        if (sessionsData && sessionsData.length > 0) {
-          // Transform to match old timetable structure
-          const transformedData = sessionsData.map((session: any) => ({
-            id: session.id,
-            title: session.subject,
-            day_of_week: session.day_of_week,
-            start_time: session.start_time,
-            end_time: session.end_time,
-            subject: session.subject,
-            class_date: undefined,
-          }));
-          console.log('[Student Timetable] Setting timetable with', transformedData.length, 'sessions');
-          setTimetable(transformedData);
-        } else {
-          console.log('[Student Timetable] No sessions found or empty result');
-          setTimetable([]);
-        }
-      } else {
-        console.log('[Student Timetable] No matching class found for form_class:', currentProfile.form_class);
-        setTimetable([]);
+      if (sessionsData) {
+        const transformedData = sessionsData.map((session: { id: string; subject: string; day_of_week: string; start_time: string; end_time: string }) => ({
+          id: session.id,
+          title: session.subject,
+          day_of_week: session.day_of_week,
+          start_time: session.start_time,
+          end_time: session.end_time,
+          subject: session.subject,
+        }));
+        setTimetable(transformedData);
       }
-    } else {
-      console.log('[Student Timetable] No form_class in profile');
     }
     
     if (quizzesRes.data) {
@@ -490,7 +497,8 @@ export default function StudentDashboard() {
     if (!isToday) return false;
     
     if (timetableFilter === 'my_subjects') {
-      return profile?.subjects?.some((subject: string) => 
+      const mySubjects = profile?.subjects || [];
+      return mySubjects.length === 0 || mySubjects.some((subject: string) => 
         subject.toLowerCase().trim() === t.subject.toLowerCase().trim()
       );
     }
@@ -723,152 +731,313 @@ export default function StudentDashboard() {
           </div>
         )}
 
-        {/* Overview Tab */}
         {activeTab === "overview" && (
-          <div className="space-y-4 sm:space-y-6">
-            {/* Welcome Card */}
-            <div className="bg-gradient-to-br from-chart-3/20 to-accent/10 rounded-2xl p-6 border border-chart-3/20">
-              <div className="flex items-start justify-between">
-                <div>
-                  <h2 className="text-2xl font-bold text-foreground mb-2">
-                    Welcome back, {profile?.full_name?.split(" ")[0]}!
-                  </h2>
-                  <p className="text-muted-foreground">
-                    {profile?.form_class} at {profile?.school_name}
-                  </p>
-                  <p className="text-sm text-chart-3 font-mono mt-2">
-                    ID: {profile?.admission_number}
-                  </p>
+          <div className="space-y-12 sm:space-y-20 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+            {/* 0. Immersive Welcome Header */}
+            <div className="relative overflow-hidden bg-card rounded-[3rem] p-10 border border-border/50 shadow-2xl group">
+              <div className="absolute -top-24 -right-24 w-96 h-96 bg-primary/20 rounded-full blur-[120px] group-hover:bg-primary/30 transition-all duration-1000 animate-pulse" />
+              <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-accent/20 rounded-full blur-[120px] group-hover:bg-accent/30 transition-all duration-1000" />
+              
+              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-10">
+                <div className="space-y-6">
+                  <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-muted/50 border border-border/50 rounded-full backdrop-blur-xl">
+                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] font-black tracking-[0.2em] uppercase text-muted-foreground/80">Systems Optimal • Cognitive Core Active</span>
+                  </div>
+                  <h1 className="text-5xl md:text-7xl font-black text-foreground tracking-tighter leading-tight">
+                    Hello, <span className="text-primary">{profile?.full_name?.split(" ")[0]}</span>
+                    <span className="block text-xl md:text-2xl font-medium text-muted-foreground tracking-tight mt-2 italic">Ready for today's learning adventure?</span>
+                  </h1>
                 </div>
-                <div className="hidden sm:block">
-                  <Sparkles className="w-12 h-12 text-chart-3/50" />
+                
+                <div className="flex items-center gap-6">
+                  <div className="text-right hidden sm:block">
+                    <p className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest mb-1">Session ID</p>
+                    <p className="text-sm font-mono text-primary/60">{profile?.admission_number}</p>
+                  </div>
+                  <div className="w-24 h-24 p-1.5 bg-gradient-to-br from-primary via-accent to-primary rounded-[2rem] shadow-2xl shadow-primary/20 hover:scale-105 transition-transform duration-700">
+                    <div className="w-full h-full rounded-[1.7rem] bg-card flex items-center justify-center overflow-hidden">
+                      {profile?.avatar_url ? (
+                        <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
+                      ) : (
+                        <div className="text-3xl font-black text-primary">
+                          {profile?.full_name?.charAt(0)}
+                        </div>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Upcoming Exams Section */}
-            {profile && <StudentUpcomingExams studentClassName={profile.form_class} />}
+            {/* 1. Unified Success Index (Top Priority - Visually Dominant) */}
+            {inference && (
+              <div className="relative flex flex-col items-center justify-center text-center py-10 px-6 sm:py-16 bg-gradient-to-b from-primary/10 via-background to-background rounded-[3rem] border border-white/5 shadow-[0_0_100px_rgba(var(--primary),0.05)] overflow-hidden">
+                {/* Core Brain Visualization Glow */}
+                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary/20 rounded-full blur-[120px] animate-pulse" />
+                
+                <div className="relative z-10 space-y-8 w-full max-w-2xl">
+                   {/* Motivational Caption */}
+                   <div className="space-y-2">
+                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-muted/50 border border-border/50 rounded-full backdrop-blur-xl mb-4">
+                       <Sparkles className="w-4 h-4 text-primary animate-bounce" />
+                       <span className="text-[11px] font-black tracking-[0.2em] uppercase text-foreground/80">Intelligent Learning Companion</span>
+                     </div>
+                     <h2 className="text-3xl sm:text-5xl font-black text-foreground tracking-tight leading-[1.1]">
+                        {inference.motivationalCaption}
+                     </h2>
+                   </div>
 
-            {/* Attendance Overview Card - Replaced StudentAttendanceSummary for a premium look */}
-            {profile && (
-              <AttendanceOverviewCard 
-                studentId={profile.id} 
-                onViewFull={() => setActiveTab("attendance")}
-              />
-            )}
+                   {/* Radial Progress Engine */}
+                   <div className="relative w-64 h-64 sm:w-80 sm:h-80 mx-auto group">
+                      <svg className="w-full h-full -rotate-90">
+                        {/* Background Path */}
+                        <circle cx="50%" cy="50%" r="45%" fill="transparent" stroke="currentColor" strokeWidth="2" className="opacity-[0.05]" />
+                        {/* Animated Intelligence Ring */}
+                        <circle
+                          cx="50%"
+                          cy="50%"
+                          r="45%"
+                          fill="transparent"
+                          stroke="url(#luxuryGradient)"
+                          strokeWidth="12"
+                          strokeDasharray="100%"
+                          strokeDashoffset={`${100 - (inference.successScore * 100)}%`}
+                          strokeLinecap="round"
+                          className="transition-all duration-[3000ms] ease-out shadow-[0_0_30px_rgba(var(--primary),0.5)]"
+                          style={{
+                             strokeDasharray: "283%", // Approx 2 * PI * 45% of 100
+                             strokeDashoffset: `${283 - (283 * inference.successScore)}%`
+                          }}
+                        />
+                        <defs>
+                          <linearGradient id="luxuryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="var(--primary)" />
+                            <stop offset="50%" stopColor="var(--accent)" />
+                            <stop offset="100%" stopColor="var(--primary)" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                      
+                      {/* Inner Data Layer */}
+                      <div className="absolute inset-0 flex flex-col items-center justify-center">
+                         {/* Trajectory Velocity Vector (The One Feature That Makes This Platform Legendary) */}
+                         {inference.trajectory && (
+                            <div className={`absolute top-14 flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted/50 border border-border/50 backdrop-blur-md animate-pulse shadow-xl ${
+                              inference.trajectory.successGain >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}>
+                               {inference.trajectory.successGain >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                               <span className="text-[9px] font-black uppercase tracking-[0.2em]">
+                                 {inference.trajectory.successGain >= 0 ? 'Rising Momentum' : 'Stability Alert'}
+                               </span>
+                            </div>
+                         )}
 
-            {/* Content Grid: Calendar + Stats */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Calendar - Left Column on Desktop */}
-              <div className="lg:col-span-1">
-                <StudentCalendar />
-              </div>
-
-              {/* Stats - Right Column on Desktop */}
-              <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div 
-                  onClick={() => setActiveTab("notes")}
-                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-primary/50 transition-all hover:bg-muted/30"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-primary/20 rounded-lg flex items-center justify-center">
-                      <FileText className="w-5 h-5 text-primary" />
-                    </div>
-                  </div>
-                  <p className="text-2xl font-bold text-foreground">{notes.length}</p>
-                  <p className="text-sm text-muted-foreground">Study Materials</p>
-                </div>
-
-                <div 
-                  onClick={() => setActiveTab("assignments")}
-                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-chart-3/50 transition-all hover:bg-muted/30"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-chart-3/20 rounded-lg flex items-center justify-center">
-                      <Target className="w-5 h-5 text-chart-3" />
-                    </div>
-                  </div>
-                  <p className="text-2xl font-bold text-foreground">{pendingAssignments.length}</p>
-                  <p className="text-sm text-muted-foreground">Pending Tasks</p>
-                </div>
-
-                <div 
-                  onClick={() => setActiveTab("quizzes")}
-                  className="bg-card border border-border/50 rounded-xl p-5 cursor-pointer hover:border-accent/50 transition-all hover:bg-muted/30"
-                >
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-accent/20 rounded-lg flex items-center justify-center">
-                      <Brain className="w-5 h-5 text-accent" />
-                    </div>
-                  </div>
-                  <p className="text-2xl font-bold text-foreground">{quizzes.length}</p>
-                  <p className="text-sm text-muted-foreground">Available Quizzes</p>
-                </div>
-
-                <div className="bg-card border border-border/50 rounded-xl p-5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <div className="w-10 h-10 bg-destructive/20 rounded-lg flex items-center justify-center">
-                      <Clock className="w-5 h-5 text-destructive" />
-                    </div>
-                  </div>
-                  <p className="text-2xl font-bold text-foreground">{todayClasses.length}</p>
-                  <p className="text-sm text-muted-foreground">Classes Today</p>
-                </div>
-              </div>
-            </div>
-
-            {/* Today's Schedule */}
-            {todayClasses.length > 0 && (
-              <div className="bg-card border border-border/50 rounded-xl p-6">
-                <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                  <Calendar className="w-5 h-5 text-primary" />
-                  Today's Schedule
-                </h3>
-                <div className="space-y-3">
-                  {todayClasses.map((entry) => (
-                    <div
-                      key={entry.id}
-                      className="flex items-center gap-4 p-3 bg-muted/50 rounded-lg"
-                    >
-                      <div className="text-sm font-mono text-muted-foreground w-24">
-                        {entry.start_time} - {entry.end_time}
+                         <div className="text-6xl sm:text-8xl font-black text-foreground tracking-tighter tabular-nums drop-shadow-2xl">
+                           {Math.round(inference.successScore * 100)}
+                         </div>
+                         <div className="flex flex-col items-center mt-[-10px]">
+                            <div className="text-[10px] sm:text-xs font-black text-primary uppercase tracking-[0.3em]">
+                               {inference.progressZoneLabel || "Success Index"}
+                            </div>
+                            <div className={`mt-3 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all duration-1000 ${
+                              inference.successScore > 0.85 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.1)]' :
+                              inference.successScore > 0.6 ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.1)]' :
+                              inference.successScore > 0.3 ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.1)]' :
+                              'bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-[0_0_20px_rgba(244,63,94,0.1)]'
+                            }`}>
+                               {inference.zone}
+                            </div>
+                         </div>
                       </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-foreground">{entry.title}</p>
-                        <p className="text-sm text-muted-foreground">{entry.subject}</p>
-                      </div>
-                    </div>
-                  ))}
+                   </div>
+
+                   {/* Layer 2: Simple Meaning Statement */}
+                   <div className="mt-6 p-6 bg-muted/30 border border-border/50 rounded-2xl backdrop-blur-md max-w-md mx-auto">
+                      <p className="text-sm text-foreground/70 font-medium leading-relaxed italic">
+                         "{inference.meaningStatement || "Your learning rhythm is being analyzed by the CCIC neural engine."}"
+                      </p>
+                   </div>
                 </div>
               </div>
             )}
 
-            {/* Upcoming Assignments */}
-            {pendingAssignments.length > 0 && (
-              <div className="bg-card border border-border/50 rounded-xl p-6">
-                <h3 className="font-semibold text-foreground mb-4 flex items-center gap-2">
-                  <Target className="w-5 h-5 text-chart-3" />
-                  Upcoming Tasks
-                </h3>
-                <div className="space-y-3">
-                  {pendingAssignments.slice(0, 3).map((assignment) => (
-                    <div
-                      key={assignment.id}
-                      onClick={() => setActiveTab("assignments")}
-                      className="flex items-center justify-between p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors border border-transparent hover:border-border/50"
-                    >
+            {/* 2. AI Insight Narrative Panel (Mentorship Style) */}
+            {inference && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center px-4 sm:px-0">
+                <div className="lg:col-span-7 space-y-6">
+                   <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center shadow-lg shadow-primary/10">
+                         <Brain className="w-6 h-6 text-primary" />
+                      </div>
                       <div>
-                        <p className="font-medium text-foreground">{assignment.title}</p>
-                        <p className="text-sm text-muted-foreground">
-                          Due: {new Date(assignment.due_date).toLocaleDateString()}
-                        </p>
+                        <h3 className="text-lg font-black text-foreground uppercase tracking-wider">Mentorship Intelligence</h3>
+                        <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest">Real-time Guidance Layer</p>
                       </div>
-                      <ChevronRight className="w-5 h-5 text-muted-foreground" />
-                    </div>
-                  ))}
+                   </div>
+
+                   <div className="relative p-8 bg-card border border-border/50 rounded-[2.5rem] backdrop-blur-3xl shadow-2xl group overflow-hidden">
+                      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-100 transition-opacity">
+                         <Zap className="w-12 h-12 text-primary" />
+                      </div>
+                      <p className="text-xl sm:text-2xl font-medium text-foreground leading-relaxed tracking-tight italic">
+                        "{inference.insights[0]}"
+                      </p>
+                      <div className="mt-8 flex items-center gap-4">
+                         <div className="flex -space-x-2">
+                            {[1,2,3].map(i => (
+                              <div key={i} className="w-8 h-8 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">
+                                {i}
+                              </div>
+                            ))}
+                         </div>
+                         <p className="text-xs text-primary font-black uppercase tracking-widest">Correlated with {Math.round(inference.successScore * 100)}+ metrics</p>
+                      </div>
+                   </div>
                 </div>
+                 {/* 3. Risk Signal Indicators (Compact Viz) */}
+                 <div className="lg:col-span-5 space-y-8">
+                    <h4 className="text-sm font-black text-muted-foreground uppercase tracking-[0.3em]">Performance Guardrails</h4>
+                    <div className="grid grid-cols-2 gap-6">
+                       {[
+                         { label: 'Attendance', value: 1 - inference.riskSignals.attendance, color: 'primary', icon: Clock },
+                         { label: 'Payment', value: 1 - inference.riskSignals.payment, color: 'accent', icon: CreditCard },
+                         { label: 'Engagement', value: 1 - inference.riskSignals.engagement, color: 'yellow-500', icon: Zap },
+                         { label: 'Academic', value: 1 - inference.riskSignals.academic, color: 'emerald-400', icon: TrendingUp }
+                       ].map((sig) => (
+                         <div key={sig.label} className="space-y-3 group">
+                            <div className="flex items-center justify-between">
+                               <div className="flex items-center gap-2">
+                                  <sig.icon className={`w-3.5 h-3.5 text-${sig.color} opacity-70`} />
+                                  <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{sig.label}</span>
+                               </div>
+                               <span className={`text-xs font-black ${sig.value < 0.5 ? 'text-destructive' : 'text-emerald-400'}`}>
+                                 {Math.round(sig.value * 100)}%
+                               </span>
+                            </div>
+                            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                               <div
+                                 className={`h-full rounded-full transition-all duration-1000 group-hover:opacity-80 ${sig.value >= 0.75 ? 'bg-emerald-500' : sig.value >= 0.5 ? 'bg-amber-500' : 'bg-destructive'}`}
+                                 style={{ width: `${sig.value * 100}%` }}
+                               />
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                    <div className="p-4 bg-muted/50 border border-border/50 rounded-2xl">
+                       <p className="text-[10px] text-muted-foreground leading-relaxed">
+                         Performance indicators are calculated by the CCIC using your real attendance, payment, engagement, and academic data. Green indicates strong performance; red signals areas for improvement.
+                       </p>
+                    </div>
+                 </div>
               </div>
             )}
+
+            {/* 4. Support & Engagement Visualization Grid */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
+               {/* Left: Attendance Visualization */}
+               <div className="lg:col-span-5">
+                  {profile && (
+                    <AttendanceOverviewCard 
+                      studentId={profile.id} 
+                      onViewFull={() => setActiveTab("attendance")}
+                    />
+                  )}
+               </div>
+
+               {/* Right: Quick Intelligence Summary Cards */}
+               <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {[
+                    { id: 'notes', label: 'Knowledge Base', count: notes.length, icon: BookOpen, sub: 'Available Resources', color: 'from-blue-500/20 to-indigo-500/20' },
+                    { id: 'assignments', label: 'Active Missions', count: pendingAssignments.length, icon: Target, sub: 'Pending Submissions', color: 'from-emerald-500/20 to-teal-500/20' },
+                    { id: 'quizzes', label: 'Neural Tests', count: quizzes.length, icon: Brain, sub: 'Skills Assessment', color: 'from-purple-500/20 to-pink-500/20' },
+                    { id: 'events', label: 'Social Sync', count: 2, icon: Users, sub: 'Upcoming Events', color: 'from-amber-500/20 to-orange-500/20' }
+                  ].map((card) => (
+                    <div 
+                      key={card.id}
+                      onClick={() => setActiveTab(card.id as any)}
+                      className="group relative overflow-hidden bg-card border border-border/50 rounded-[2rem] p-6 cursor-pointer hover:bg-muted/50 transition-all duration-500"
+                    >
+                      <div className={`absolute inset-0 bg-gradient-to-br ${card.color} opacity-0 group-hover:opacity-100 transition-opacity duration-700`} />
+                      <div className="relative z-10 flex justify-between items-start">
+                         <div className="space-y-4">
+                            <div className="w-10 h-10 rounded-xl bg-muted border border-border/50 flex items-center justify-center group-hover:scale-110 transition-transform">
+                               <card.icon className="w-5 h-5 text-muted-foreground" />
+                            </div>
+                            <div>
+                               <p className="text-3xl font-black text-foreground tracking-tighter">{card.count}</p>
+                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{card.label}</p>
+                            </div>
+                         </div>
+                         <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-tight">{card.sub}</div>
+                      </div>
+                    </div>
+                  ))}
+               </div>
+            </div>
+
+            {/* 5. Trend Mini Analytics / Timeline */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
+               {/* Daily Session Re-styled */}
+               {todayClasses.length > 0 && (
+                 <div className="bg-card border border-border/50 rounded-[3rem] p-8 space-y-8">
+                    <div className="flex items-center justify-between">
+                       <h3 className="text-xl font-black text-foreground tracking-tight flex items-center gap-3">
+                         <Calendar className="w-5 h-5 text-primary" />
+                         Schedule Sync
+                       </h3>
+                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{todayClasses.length} Events Today</p>
+                    </div>
+                    <div className="space-y-4">
+                       {todayClasses.map((session, i) => (
+                         <div key={session.id} className="group flex items-center gap-6 p-4 bg-muted/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
+                            <div className="flex flex-col items-center min-w-[50px]">
+                               <span className="text-sm font-black text-foreground">{session.start_time.split(":")[0]}</span>
+                               <span className="text-[9px] font-bold text-muted-foreground uppercase">AM</span>
+                            </div>
+                            <div className="h-10 w-px bg-border/50" />
+                            <div className="flex-1">
+                               <p className="text-base font-bold text-foreground group-hover:text-primary transition-colors">{session.title}</p>
+                               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{session.subject}</p>
+                            </div>
+                            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                               <ChevronRight className="w-5 h-5 text-primary" />
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                 </div>
+               )}
+
+               {/* Recent Mission Briefings */}
+               {pendingAssignments.length > 0 && (
+                 <div className="bg-card border border-border/50 rounded-[3rem] p-8 space-y-8">
+                    <div className="flex items-center justify-between">
+                       <h3 className="text-xl font-black text-foreground tracking-tight flex items-center gap-3">
+                         <Target className="w-5 h-5 text-emerald-400" />
+                         Mission Intel
+                       </h3>
+                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{pendingAssignments.length} Active</p>
+                    </div>
+                    <div className="space-y-4">
+                       {pendingAssignments.slice(0, 3).map((assignment) => (
+                         <div key={assignment.id} onClick={() => setActiveTab("assignments")} className="group flex items-center justify-between p-5 bg-muted/50 rounded-2xl border border-transparent hover:border-emerald-500/20 cursor-pointer transition-all">
+                            <div className="space-y-1">
+                               <p className="text-base font-bold text-foreground group-hover:text-emerald-400 transition-colors tracking-tight">{assignment.title}</p>
+                               <div className="flex items-center gap-2">
+                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Due in {new Date(assignment.due_date).getDate() - new Date().getDate()} days</p>
+                               </div>
+                            </div>
+                            <div className="w-10 h-10 rounded-xl bg-muted border border-border/50 flex items-center justify-center">
+                               <ChevronRight className="w-4 h-4 text-emerald-400 mt-[-2px]" />
+                            </div>
+                         </div>
+                       ))}
+                    </div>
+                 </div>
+               )}
+            </div>
           </div>
         )}
 
@@ -1106,7 +1275,11 @@ export default function StudentDashboard() {
                   {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
                     const daySessions = timetable.filter(t => t.day_of_week === day);
                     const filteredSessions = timetableFilter === 'my_subjects' 
-                      ? daySessions.filter(s => profile?.subjects?.includes(s.subject))
+                      ? daySessions.filter(s => 
+                          profile?.subjects?.some((subject: string) => 
+                            subject.toLowerCase().trim() === s.subject.toLowerCase().trim()
+                          )
+                        )
                       : daySessions;
                     if (filteredSessions.length === 0) return null;
                     

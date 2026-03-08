@@ -1,17 +1,12 @@
-'use client';
-
 import { useState, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
-import { Calendar, Plus, Lock, Unlock, Eye, EyeOff, Save, AlertTriangle } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { Calendar, Plus, Eye, EyeOff, Lock } from 'lucide-react';
 import { useTimetable } from '@/hooks/useTimetable';
-import SessionEditor from './SessionEditor';
 import WeeklyTimetableGrid from './WeeklyTimetableGrid';
 import TimetablePublisher from './TimetablePublisher';
+import SessionEditor from './SessionEditor';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+const supabase = createClient();
 
 interface Class {
   id: string;

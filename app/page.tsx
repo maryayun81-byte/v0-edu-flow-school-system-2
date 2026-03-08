@@ -14,6 +14,7 @@ import {
   Target
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PwaInstallButton } from "@/components/PwaInstallButton";
 
 export default function Home() {
   return (
@@ -71,6 +72,12 @@ export default function Home() {
             A premium tutoring platform connecting students and teachers 
             with real-time messaging, intelligent scheduling, and seamless collaboration.
           </p>
+          
+          {/* PWA Install Button */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
+            <PwaInstallButton variant="button" />
+            <p className="text-xs text-muted-foreground">Works on all devices · No app store needed</p>
+          </div>
         </div>
 
         {/* Portal Cards */}
@@ -168,6 +175,8 @@ export default function Home() {
           </div>
         </div>
       </footer>
+      {/* PWA Auto-Banner (shows after 2.5s if installable) */}
+      <PwaInstallButton variant="banner" />
     </div>
   );
 }

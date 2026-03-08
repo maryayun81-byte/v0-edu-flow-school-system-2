@@ -11,7 +11,8 @@ import {
   CalendarDays, 
   BarChart2, 
   FileDown, 
-  Sparkles 
+  Sparkles,
+  ShieldCheck
 } from "lucide-react";
 
 import FinanceOverview from "./FinanceOverview";
@@ -21,22 +22,26 @@ import FinanceReceipts from "./FinanceReceipts";
 import EventFinance from "./EventFinance";
 import FinanceAnalytics from "./FinanceAnalytics";
 import FinanceReports from "./FinanceReports";
+import FinanceIntelligenceOverview from "./FinanceIntelligenceOverview";
+import FinanceGovernancePanel from "./FinanceGovernancePanel";
 import { TuitionEvent, Student, Payment, Receipt } from "./types";
 
 const supabase = createClient();
 
 const TABS = [
-  { id: "overview",  label: "Overview",         icon: Sparkles },
-  { id: "record",    label: "Record Payments",   icon: Plus },
+  { id: "intelligence", label: "Intelligence", icon: Sparkles },
+  { id: "overview",     label: "Overview",     icon: DollarSign },
+  { id: "record",       label: "Record Payments", icon: Plus },
   { id: "records",   label: "Payment Records",   icon: List },
   { id: "receipts",  label: "Receipts",          icon: ReceiptIcon },
   { id: "events",    label: "Event Finance",      icon: CalendarDays },
   { id: "analytics", label: "Analytics",         icon: BarChart2 },
   { id: "reports",   label: "Reports & Exports", icon: FileDown },
+  { id: "governance", label: "AI Governance",    icon: ShieldCheck },
 ];
 
 export default function AdvancedFinanceManager({ adminId }: { adminId: string }) {
-  const [activeTab, setActiveTab] = useState("overview");
+  const [activeTab, setActiveTab] = useState("intelligence");
   const [students, setStudents] = useState<Student[]>([]);
   const [events, setEvents] = useState<TuitionEvent[]>([]);
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -116,6 +121,7 @@ export default function AdvancedFinanceManager({ adminId }: { adminId: string })
         </div>
       ) : (
         <>
+          {activeTab === "intelligence" && <FinanceIntelligenceOverview />}
           {activeTab === "overview"  && <FinanceOverview payments={payments} events={events} students={students} />}
           {activeTab === "record"    && <RecordPayment adminId={adminId} students={students} events={events} onSuccess={fetchAll} />}
           {activeTab === "records"   && <PaymentRecords payments={payments} events={events} onRefresh={fetchAll} adminId={adminId} onReceiptGenerated={fetchAll} />}
@@ -123,6 +129,7 @@ export default function AdvancedFinanceManager({ adminId }: { adminId: string })
           {activeTab === "events"    && <EventFinance payments={payments} events={events} students={students} />}
           {activeTab === "analytics" && <FinanceAnalytics payments={payments} events={events} />}
           {activeTab === "reports"   && <FinanceReports payments={payments} events={events} students={students} />}
+          {activeTab === "governance" && <FinanceGovernancePanel />}
         </>
       )}
     </div>
