@@ -3,6 +3,8 @@ import { createClient } from "@/lib/supabase/server";
 import crypto from "crypto";
 import { IntelligentEngine } from "@/lib/ai/IntelligentEngine";
 
+export const dynamic = 'force-dynamic';
+
 export async function POST(req: Request) {
   try {
     const { type, data, context } = await req.json();

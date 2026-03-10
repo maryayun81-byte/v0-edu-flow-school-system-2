@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/client';
 import { BehavioralSignals } from './CognitiveCore';
 
-const supabase = createClient();
+// const supabase = createClient(); // Moved to getter to avoid build-time errors
 
 export interface TrajectoryMetrics {
   successGain: number;       // Change in success score since last snapshot
@@ -25,6 +25,9 @@ export interface BehavioralTrajectory {
 }
 
 export class TrajectoryForecaster {
+  private static get supabase() {
+    return createClient();
+  }
   /**
    * Records a point-in-time snapshot of student signals for sequence modelling.
    */
@@ -35,7 +38,7 @@ export class TrajectoryForecaster {
     }
 
     try {
-      const { error } = await supabase
+      const { error } = await this.supabase
         .from('behavioral_trajectories')
         .upsert({
           student_id: studentId,
@@ -75,7 +78,7 @@ export class TrajectoryForecaster {
     }
 
     try {
-      const { data: snapshots, error } = await supabase
+      const { data: snapshots, error } = await this.supabase
         .from('behavioral_trajectories')
         .select('*')
         .eq('student_id', studentId)

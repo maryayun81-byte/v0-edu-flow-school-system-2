@@ -14,7 +14,7 @@ import { createClient } from '@/lib/supabase/client';
 import { TrajectoryForecaster, TrajectoryMetrics } from './TrajectoryForecaster';
 import { ResultsCognitiveCore } from './ResultsCognitiveCore';
 
-const supabase = createClient();
+// const supabase = createClient(); // Moved inside methods to avoid build-time errors
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -329,6 +329,9 @@ function isDuplicate(narrative: string): boolean {
 // ─── CognitiveCore (Main Export) ─────────────────────────────────────────────
 
 export class CognitiveCore {
+  private static get supabase() {
+    return createClient();
+  }
   private static MIN_INFERENCE_THRESHOLD = 10;  // Reduced: 10 events sufficient for real inference
   private static PEER_MEDIAN_ATTENDANCE  = 0.82;
   private static PEER_MEDIAN_STABILITY   = 0.78;
@@ -509,7 +512,7 @@ export class CognitiveCore {
     try {
       const isUUID = studentId && studentId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
       
-      await supabase.from('intelligence_insights').upsert({
+      await this.supabase.from('intelligence_insights').upsert({
         entity_type: isUUID ? 'student' : 'platform',
         entity_id: isUUID ? studentId : null,
         insight_text: narrative,
@@ -536,7 +539,7 @@ export class CognitiveCore {
     // 1. Try reading precomputed insights first (performance architecture)
     const isUUID = entityId && entityId.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
     
-    let query = supabase
+    let query = this.supabase
       .from('intelligence_insights')
       .select('insight_text, insight_type, confidence, created_at')
       .in('insight_type', domains);
@@ -640,7 +643,7 @@ export class CognitiveCore {
    */
   static async getGlobalMetrics(): Promise<{ successIndex: number; dropoutRisk: number; zone: ClassificationZone }> {
     try {
-      const { data: trajectories } = await supabase
+      const { data: trajectories } = await this.supabase
         .from('behavioral_trajectories')
         .select('success_score')
         .order('snapshot_date', { ascending: false })
@@ -669,7 +672,7 @@ export class CognitiveCore {
       const cutoff14 = new Date(now - 14 * 86400000).toISOString();
       const cutoff28 = new Date(now - 28 * 86400000).toISOString();
 
-      let attQuery = supabase
+      let attQuery = this.supabase
         .from('attendance')
         .select('status, created_at');
 
@@ -691,7 +694,7 @@ export class CognitiveCore {
       const p14Pct     = prev14.length   > 0 ? prev14.filter((r: any)   => r.status === 'present').length / prev14.length   : attRate;
       const recentDelta = r14Pct - p14Pct;
 
-      let payQuery = supabase
+      let payQuery = this.supabase
         .from('ppt_payments')
         .select('status');
       
@@ -707,7 +710,7 @@ export class CognitiveCore {
       const paymentReliability = payTotal > 0 ? payPaid / payTotal : 0.90;
 
       // Engagement Velocity based on session frequency
-      const { data: sessions } = await supabase
+      const { data: sessions } = await this.supabase
         .from('audit_logs') // Assuming audit_logs tracks logins/actions
         .select('created_at')
         .eq('created_by', studentId)

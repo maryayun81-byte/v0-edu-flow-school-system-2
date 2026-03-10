@@ -14,7 +14,7 @@ import { createClient } from '@/lib/supabase/client';
 import { BehavioralSignals, InsightDomain, DashboardContext } from './CognitiveCore';
 import { TrajectoryMetrics, TrajectoryForecaster } from './TrajectoryForecaster';
 
-const supabase = createClient();
+// const supabase = createClient(); // Moved to getter to avoid build-time errors
 
 // ─── Public Types ─────────────────────────────────────────────────────────────
 
@@ -95,6 +95,9 @@ export interface ReadinessResult {
 // ─── Grade helpers ─────────────────────────────────────────────────────────────
 
 export class ResultsCognitiveCore {
+  private static get supabase() {
+    return createClient();
+  }
 
   static gradeToNumeric(grade: string): number {
     const map: Record<string, number> = {
@@ -149,7 +152,7 @@ export class ResultsCognitiveCore {
 
   static async syncEventStatuses() {
     try {
-      const { error } = await supabase.rpc('sync_tuition_event_status');
+      const { error } = await this.supabase.rpc('sync_tuition_event_status');
       if (error) throw error;
     } catch (error) {
       console.error('[RCCIC] Event Sync Error:', error);
@@ -157,7 +160,7 @@ export class ResultsCognitiveCore {
   }
 
   static async getActiveEvent() {
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('tuition_events')
       .select('*')
       .eq('active_status', true)
@@ -175,7 +178,7 @@ export class ResultsCognitiveCore {
     const isUUID = this.isValidUUID(studentId);
     if (!isUUID) return [];
 
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('student_results')
       .select(`
         *,
@@ -217,7 +220,7 @@ export class ResultsCognitiveCore {
     const isUUID = this.isValidUUID(studentId);
     if (!isUUID) return {};
 
-    const { data, error } = await supabase
+    const { data, error } = await this.supabase
       .from('marks')
       .select(`
         score, max_score,
@@ -249,7 +252,7 @@ export class ResultsCognitiveCore {
     if (!isUUID) return null;
 
     // Fetch current event results
-    const { data: currentResults } = await supabase
+    const { data: currentResults } = await this.supabase
       .from('student_results')
       .select('*, tuition_events!inner(name)')
       .eq('student_id', studentId)
@@ -268,7 +271,7 @@ export class ResultsCognitiveCore {
     });
 
     // Fetch previous event results (get second most recent event)
-    const { data: allEventResults } = await supabase
+    const { data: allEventResults } = await this.supabase
       .from('student_results')
       .select('*, tuition_events!inner(start_date)')
       .eq('student_id', studentId)
@@ -286,7 +289,7 @@ export class ResultsCognitiveCore {
     }
 
     // Fetch behavioral signals
-    const { data: attData } = await supabase
+    const { data: attData } = await this.supabase
       .from('attendance')
       .select('status')
       .eq('student_id', studentId);
@@ -318,7 +321,7 @@ export class ResultsCognitiveCore {
    * Fetch and calculate class-wide analytics for an event + class.
    */
   static async fetchClassAnalytics(formClass: string, eventId: string): Promise<ClassAnalytics | null> {
-    const { data: results, error } = await supabase
+    const { data: results, error } = await this.supabase
       .from('student_results')
       .select(`
         *,
@@ -733,7 +736,7 @@ export class ResultsCognitiveCore {
    * Class-level analytics for teacher dashboard.
    */
   static async generateClassAnalytics(eventId: string): Promise<ClassAnalytics> {
-    const { data: results } = await supabase
+    const { data: results } = await this.supabase
       .from('student_results')
       .select('student_id, overall_grade, subject_name, grade')
       .eq('event_id', eventId);
@@ -833,7 +836,7 @@ export class ResultsCognitiveCore {
       return { averageGradeNumeric: 0.5, improvementDelta: 0, improvementVelocity: 0, subjectConsistency: 1, subjectTrends: {}, riskSignals: [] };
     }
 
-    const { data: rawData, error } = await supabase
+    const { data: rawData, error } = await this.supabase
       .from('student_results')
       .select('*')
       .eq('student_id', studentId)
@@ -988,7 +991,7 @@ export class ResultsCognitiveCore {
       const hash = this.hashInsight(insight.text);
 
       // Check cross-student registry — if this hash exists for a different student, rotate phrasing
-      const { data: registryEntry } = await supabase
+      const { data: registryEntry } = await this.supabase
         .from('student_insight_registry')
         .select('student_id')
         .eq('insight_hash', hash)
@@ -1002,7 +1005,7 @@ export class ResultsCognitiveCore {
       }
 
       // Check own memory for duplicate
-      const { data: myInsights } = await supabase
+      const { data: myInsights } = await this.supabase
         .from('rccic_insights')
         .select('insight_hash')
         .eq('student_id', studentId)
@@ -1018,7 +1021,7 @@ export class ResultsCognitiveCore {
       // Persist
       // 1. DEDUPLICATION: Check uniqueness across ALL students
       try {
-        const { data: globalMatch } = await supabase
+        const { data: globalMatch } = await this.supabase
           .from('student_insight_registry')
           .select('student_id')
           .eq('insight_hash', hash)
@@ -1029,7 +1032,7 @@ export class ResultsCognitiveCore {
 
       // 2. SIMILARITY: Check if this student already received a very similar insight
       try {
-        const { data: existing } = await supabase
+        const { data: existing } = await this.supabase
           .from('rccic_insights')
           .select('insight_text')
           .eq('student_id', studentId)
@@ -1043,7 +1046,7 @@ export class ResultsCognitiveCore {
 
       // 3. PERSIST
       try {
-        await supabase.from('rccic_insights').insert({
+        await this.supabase.from('rccic_insights').insert({
           student_id: studentId,
           event_id: eventId,
           insight_type: insight.type,
@@ -1052,7 +1055,7 @@ export class ResultsCognitiveCore {
           insight_hash: hash,
         });
 
-        await supabase.from('student_insight_registry').upsert({
+        await this.supabase.from('student_insight_registry').upsert({
           student_id: studentId,
           event_id: eventId,
           insight_hash: hash,
@@ -1069,7 +1072,7 @@ export class ResultsCognitiveCore {
    * Get previously stored insights for a student + event (from DB cache).
    */
   static async getCachedInsights(studentId: string, eventId: string): Promise<RCCICInsight[]> {
-    const { data } = await supabase
+    const { data } = await this.supabase
       .from('rccic_insights')
       .select('insight_type, subject, insight_text')
       .eq('student_id', studentId)
@@ -1089,7 +1092,7 @@ export class ResultsCognitiveCore {
    */
   static async getInsights(studentId: string, eventId: string): Promise<RCCICInsight[]> {
     // Check cache first (valid for 1 hour)
-    const { data: cached } = await supabase
+    const { data: cached } = await this.supabase
       .from('rccic_insights')
       .select('insight_type, subject, insight_text, created_at')
       .eq('student_id', studentId)
