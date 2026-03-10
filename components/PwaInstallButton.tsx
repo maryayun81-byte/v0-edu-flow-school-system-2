@@ -19,9 +19,11 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
   const [isInstallable, setIsInstallable] = useState(false);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const [installing, setInstalling] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
   const [showIOSModal, setShowIOSModal] = useState(false);
+  const [showAndroidModal, setShowAndroidModal] = useState(false);
 
   useEffect(() => {
     // Already installed as PWA?
@@ -30,13 +32,18 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
       (window.navigator as any).standalone === true;
     if (standalone) { setIsInstalled(true); return; }
 
-    // iOS
-    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
-    if (ios) {
-      setIsIOS(true);
+    // Detection
+    const ua = navigator.userAgent;
+    const ios = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    
+    setIsIOS(ios);
+    setIsMobile(mobile);
+
+    // On mobile, we force "installable" visibility because native prompts are flaky
+    if (mobile) {
       setIsInstallable(true);
-      setTimeout(() => setShowBanner(true), 2500);
-      return;
+      setTimeout(() => setShowBanner(true), 3000);
     }
 
     // Chrome / Edge beforeinstallprompt
@@ -44,20 +51,31 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
       e.preventDefault();
       setDeferredPrompt(e as BeforeInstallPromptEvent);
       setIsInstallable(true);
+      // If native prompt is available, we use that over forcing the banner early
       setTimeout(() => setShowBanner(true), 2500);
     };
+
     window.addEventListener('beforeinstallprompt', handler);
     window.addEventListener('appinstalled', () => {
       setIsInstalled(true);
       setIsInstallable(false);
       setShowBanner(false);
     });
+
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
   const handleInstall = async () => {
     if (isIOS) { setShowIOSModal(true); return; }
-    if (!deferredPrompt) return;
+    
+    if (!deferredPrompt) {
+      // If we're on mobile and don't have a prompt, show manual instructions
+      if (isMobile) {
+        setShowAndroidModal(true);
+      }
+      return;
+    }
+
     setInstalling(true);
     try {
       await deferredPrompt.prompt();
@@ -107,11 +125,44 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
     </div>
   ) : null;
 
+  // Android / Other manual modal
+  const AndroidModal = showAndroidModal ? (
+    <div className="fixed inset-0 z-[200] bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+      <div className="bg-card border border-border rounded-2xl p-6 max-w-sm w-full shadow-2xl">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Smartphone className="w-5 h-5 text-primary" />
+            <h3 className="font-bold text-foreground">Install App</h3>
+          </div>
+          <button onClick={() => setShowAndroidModal(false)} className="text-muted-foreground hover:text-foreground">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <ol className="space-y-3 text-sm text-muted-foreground">
+          {[
+            <>Tap the <strong className="text-foreground">Menu</strong> icon (3 dots or lines) in your browser</>,
+            <>Look for <strong className="text-foreground">"Install app"</strong> or <strong className="text-foreground">"Add to Home screen"</strong></>,
+            <>Follow the on-screen prompts to confirm</>,
+          ].map((step, i) => (
+            <li key={i} className="flex items-start gap-3">
+              <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0 font-bold">{i + 1}</span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+        <button onClick={() => setShowAndroidModal(false)} className="w-full mt-5 py-2.5 bg-primary text-primary-foreground font-semibold rounded-xl hover:bg-primary/90 transition-colors">
+          Got it!
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   // ── Inline button (hero) ──────────────────────────────────────────────
   if (variant === 'button') {
     return (
       <>
         {IOSModal}
+        {AndroidModal}
         <Button
           onClick={handleInstall}
           disabled={installing}
@@ -132,6 +183,7 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
   return (
     <>
       {IOSModal}
+      {AndroidModal}
       {showBanner && (
         <div className="fixed bottom-4 left-4 right-4 z-50 max-w-lg mx-auto">
           <div className="bg-card/95 backdrop-blur-xl border border-border rounded-2xl p-4 shadow-2xl flex items-center gap-3">
