@@ -3,7 +3,6 @@
 import React from "react"
 
 import { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
 import {
   GraduationCap,
   School,
@@ -34,10 +33,8 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTheme, THEMES, type ThemeType } from "@/contexts/ThemeContext";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from "@/lib/supabase/client";
+const supabase = createClient();
 
 interface StudentProfileModalProps {
   userId: string;
@@ -121,7 +118,7 @@ export default function StudentProfileModal({
         .from("profiles")
         .update({
           school_name: schoolName,
-          form_class: formClass,
+          form_class: formClass.toLowerCase().trim(),
           subjects: subjectNames,
           theme: selectedTheme,
           profile_completed: true,
@@ -152,8 +149,33 @@ export default function StudentProfileModal({
             
           if (subjectsError) {
             console.error("Error saving subjects to table:", subjectsError);
-            // Don't block completion if this fails, but log it
           }
+        }
+      }
+
+      // 3. Auto-enroll in the corresponding class
+      if (formClass) {
+        // Find the class ID using case-insensitive match
+        const { data: classData, error: classFetchError } = await supabase
+          .from("classes")
+          .select("id")
+          .ilike("name", formClass)
+          .single();
+
+        if (classData && !classFetchError) {
+          // Link student to class in student_classes table
+          const { error: enrollError } = await supabase
+            .from("student_classes")
+            .upsert({
+              student_id: userId,
+              class_id: classData.id
+            }, { onConflict: 'student_id,class_id' });
+
+          if (enrollError) {
+            console.error("Error enrolling student in class:", enrollError);
+          }
+        } else {
+          console.error("Could not find matching class for enrollment:", formClass, classFetchError);
         }
       }
       

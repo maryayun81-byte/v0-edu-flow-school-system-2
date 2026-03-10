@@ -206,13 +206,17 @@ export default function StudentTranscriptViewer({
       
       if (!response.ok) {
         let errorMessage = "Failed to generate PDF. Please try again later.";
+        const clonedResponse = response.clone();
         try {
-          const errorData = await response.json();
+          const errorData = await clonedResponse.json();
           if (errorData.error) errorMessage = errorData.error;
         } catch (e) {
-          // If json parse fails, try text
-          const errorText = await response.text();
-          if (errorText) errorMessage = errorText;
+          try {
+            const errorText = await response.text();
+            if (errorText) errorMessage = errorText;
+          } catch (textError) {
+            console.error("Could not parse error response:", textError);
+          }
         }
         
         if (response.status === 403) errorMessage = "You do not have permission to download this transcript.";

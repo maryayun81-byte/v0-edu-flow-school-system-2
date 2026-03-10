@@ -105,6 +105,7 @@ export default function NotificationCreator({ adminId }: { adminId: string }) {
           type,
           audience,
           target_user_id: audience === 'individual' ? targetUserId : null,
+          target_role: audience === 'teacher' ? 'teacher' : (audience === 'student' ? 'student' : null),
           created_by: adminId
         });
 

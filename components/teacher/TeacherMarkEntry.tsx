@@ -34,6 +34,13 @@ interface Exam {
   status: string;
   system_type: 'CBC' | '8-4-4' | 'Combined';
   applicable_classes: string[];
+  tuition_event_id?: string | null;
+}
+
+interface TuitionEvent {
+  id: string;
+  name: string;
+  start_date: string;
 }
 
 interface Class {
@@ -68,6 +75,8 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
   const [selectedCurriculum, setSelectedCurriculum] = useState<string>("8-4-4");
   const [exams, setExams] = useState<Exam[]>([]);
   const [selectedExam, setSelectedExam] = useState<Exam | null>(null);
+  const [tuitionEvents, setTuitionEvents] = useState<TuitionEvent[]>([]);
+  const [selectedTuitionEventId, setSelectedTuitionEventId] = useState<string>('');
   const [assignedClasses, setAssignedClasses] = useState<Class[]>([]);
   const [selectedClass, setSelectedClass] = useState<string>("");
   const [assignedSubjects, setAssignedSubjects] = useState<Subject[]>([]);
@@ -80,6 +89,7 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
 
   useEffect(() => {
     fetchClosedExams();
+    fetchTuitionEvents();
   }, []);
 
   useEffect(() => {
@@ -109,6 +119,19 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
       .order("created_at", { ascending: false });
 
     if (data) setExams(data);
+  }
+
+  async function fetchTuitionEvents() {
+    const { data } = await supabase
+      .from('tuition_events')
+      .select('id, name, start_date')
+      .order('start_date', { ascending: false })
+      .limit(20);
+    if (data) {
+      setTuitionEvents(data);
+      // Pre-select the most recent active event
+      if (data.length > 0) setSelectedTuitionEventId(data[0].id);
+    }
   }
 
   async function fetchAssignedClasses() {
@@ -304,6 +327,14 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
 
       if (error) throw error;
 
+      // Link exam to the selected tuition event
+      if (selectedTuitionEventId) {
+        await supabase
+          .from('exams')
+          .update({ tuition_event_id: selectedTuitionEventId })
+          .eq('id', selectedExam.id);
+      }
+
       // Log audit event
       await supabase.rpc("log_exam_audit", {
         p_exam_id: selectedExam.id,
@@ -357,6 +388,30 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
           </div>
         </div>
       )}
+
+      {/* Tuition Event Linking */}
+      <div className="space-y-2">
+        <Label className="flex items-center gap-2">
+          <Calendar className="w-4 h-4 text-primary" />
+          Tuition Event (Link Marks To)
+        </Label>
+        <Select
+          value={selectedTuitionEventId}
+          onValueChange={setSelectedTuitionEventId}
+        >
+          <SelectTrigger className="h-11 bg-muted border-border/50">
+            <SelectValue placeholder="Select Tuition Event" />
+          </SelectTrigger>
+          <SelectContent>
+            {tuitionEvents.map((te) => (
+              <SelectItem key={te.id} value={te.id}>
+                {te.name} ({new Date(te.start_date).toLocaleDateString()})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">This links the exam marks to the selected tuition event for RCCIC analysis.</p>
+      </div>
 
       {/* Selection Controls */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">

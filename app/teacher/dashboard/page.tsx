@@ -60,6 +60,8 @@ import TeacherHome from '@/components/teacher/TeacherHome';
 import AttendanceRegister from '@/components/attendance/AttendanceRegister';
 import AttendanceReminderModal from '@/components/attendance/AttendanceReminderModal';
 import TeacherAttendanceAnalytics from '@/components/teacher/TeacherAttendanceAnalytics';
+import TeacherResultsManager from '@/components/teacher/TeacherResultsManager';
+import { ActiveEventBanner } from '@/components/ActiveEventBanner';
 
 const supabase = createClient();
 
@@ -99,7 +101,7 @@ const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'
 export default function TeacherDashboard() {
   const router = useRouter();
   const [user, setUser] = useState<SupabaseUser | null>(null);
-  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages' | 'marks' | 'attendance'>('notes');
+  const [activeTab, setActiveTab] = useState<'home' | 'notes' | 'assignments' | 'timetable' | 'quizzes' | 'profile' | 'notifications' | 'students' | 'events' | 'messages' | 'marks' | 'attendance' | 'results'>('notes');
   const [attendanceRegisterSubmitted, setAttendanceRegisterSubmitted] = useState(false);
   const [showQuizBuilder, setShowQuizBuilder] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
@@ -190,9 +192,6 @@ export default function TeacherDashboard() {
       const { data } = await supabase
         .from('notifications')
         .select('*')
-        // Safety filter: ensure we only get notifications for teachers or this specific user
-        // (RLS handles this securely, but this adds clarity to the intention)
-        .or(`target_role.eq.teacher,target_user_id.eq.${user?.id}`)
         .order('created_at', { ascending: false })
         .limit(50);
 
@@ -374,6 +373,7 @@ export default function TeacherDashboard() {
     { id: 'notes', label: 'Notes', icon: FileText, count: activeNotes.length },
     { id: 'assignments', label: 'Assignments', icon: Calendar, count: activeAssignments.length },
     { id: 'attendance', label: 'Attendance', icon: ClipboardList, count: null },
+    { id: 'results', label: 'Results', icon: Trophy, count: null },
     { id: 'marks', label: 'Marks', icon: Trophy, count: null },
     { id: 'timetable', label: 'Timetable', icon: Clock, count: timetables.length },
     { id: 'quizzes', label: 'Quizzes', icon: Brain, count: null },
@@ -688,6 +688,13 @@ export default function TeacherDashboard() {
           </div>
         );
 
+      case 'results':
+        return (
+          <div className="space-y-6">
+            <TeacherResultsManager teacherId={user!.id} />
+          </div>
+        );
+
       case 'attendance':
         return user ? (
           <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
@@ -914,6 +921,8 @@ export default function TeacherDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 md:py-8 py-4 pb-24 md:pb-8">
+        <ActiveEventBanner />
+        
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <div className="bg-white/5 backdrop-blur-xl rounded-2xl p-6 border border-white/10 hover:border-indigo-500/50 transition-all group">

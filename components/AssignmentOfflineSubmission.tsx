@@ -78,6 +78,22 @@ export default function AssignmentOfflineSubmission({
 
       if (dbError) throw dbError;
 
+      // Log activity for dashboard
+      try {
+          if (studentId) {
+              await supabase.from('notifications').insert({
+                  title: 'Assignment Submitted',
+                  message: `You submitted the assignment "${assignment.title}"`,
+                  type: 'activity',
+                  audience: 'individual',
+                  target_user_id: studentId,
+                  created_by: studentId
+              });
+          }
+      } catch (activityErr) {
+          console.error('Error logging assignment activity:', activityErr);
+      }
+
       onComplete();
 
     } catch (err: any) {

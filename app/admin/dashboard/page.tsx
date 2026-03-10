@@ -55,6 +55,8 @@ import MessagingCenter from "@/components/MessagingCenter";
 import { MessageSquare, Cpu } from "lucide-react";
 import AdvancedFinanceManager from "@/components/admin/finance/AdvancedFinanceManager";
 import AdminAIGovernance from "@/components/admin/AdminAIGovernance";
+import AdminResultsPanel from "@/components/admin/AdminResultsPanel";
+import { ActiveEventBanner } from "@/components/ActiveEventBanner";
 import { CognitiveCore, ClassificationZone } from "@/lib/ai/CognitiveCore";
 
 const supabase = createClient();
@@ -115,7 +117,7 @@ const SUBJECTS = [
 export default function AdminDashboard() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings" | "attendance" | "ai-governance">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "teachers" | "classes" | "students" | "assignments" | "timetables" | "events" | "finance" | "messages" | "notifications" | "exams" | "transcripts" | "settings" | "attendance" | "ai-governance" | "results">("overview");
   const [attendanceSubTab, setAttendanceSubTab] = useState<"analytics" | "events" | "class-teachers" | "eligibility">("analytics");
   const [adminId, setAdminId] = useState<string>("");
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -630,6 +632,7 @@ export default function AdminDashboard() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 lg:py-8 pb-24 lg:pb-8">
+        <ActiveEventBanner />
         {/* Responsive Tab Navigation */}
         <DashboardTabNavigation
           tabs={[
@@ -638,6 +641,7 @@ export default function AdminDashboard() {
             { id: "classes", label: "Classes", icon: School },
             { id: "students", label: "Students", icon: GraduationCap },
             { id: "attendance", label: "Attendance", icon: ClipboardList },
+            { id: "results", label: "Results", icon: Trophy },
             { id: "exams", label: "Exams", icon: FileText },
             { id: "transcripts", label: "Transcripts", icon: Trophy },
             { id: "assignments", label: "Assignments", icon: BookOpen },
@@ -1096,9 +1100,9 @@ export default function AdminDashboard() {
         )}
 
         {/* AI Governance Tab */}
-        {activeTab === "ai-governance" && (
-          <AdminAIGovernance />
-        )}
+        {activeTab === "ai-governance" && <AdminAIGovernance />}
+        {activeTab === "results" && <AdminResultsPanel />}
+        {activeTab === "settings" && <AdminSettingsTab />}
       </div>
     </div>
   );

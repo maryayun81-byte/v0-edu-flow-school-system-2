@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Trophy, CheckCircle, ChevronRight, Brain, Sparkles, TrendingUp, Info } from "lucide-react";
+import { Trophy, CheckCircle, ChevronRight,FileText, Brain, Sparkles, TrendingUp, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
 import { CognitiveCore } from "@/lib/ai/CognitiveCore";
@@ -17,70 +17,21 @@ interface StudentResultsProps {
 export default function StudentResults({ studentId }: StudentResultsProps) {
   const [transcripts, setTranscripts] = useState<any[]>([]);
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
-  const [filters, setFilters] = useState({ year: "", term: "", exam: "" });
+  const [eventTypeFilter, setEventTypeFilter] = useState<"All" | "Tuition" | "Exam">("All");
+  const [selectedEventId, setSelectedEventId] = useState<string>("all");
   const [loading, setLoading] = useState(true);
   const [overallInsight, setOverallInsight] = useState<string | null>(null);
   const [examSpecificInsight, setExamSpecificInsight] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     fetchTranscripts();
     loadOverallInsights();
   }, [studentId]);
-
-  async function loadOverallInsights() {
-    try {
-      // Request only 1 domain to display 1 consolidated insight
-      const insights = await CognitiveCore.getInsightsForDashboard(studentId, 'student', ['success']);
-      if (insights.length > 0) {
-        setOverallInsight(insights[0].insight_text);
-      }
-    } catch (error) {
-      console.error("Error loading overall insights:", error);
-    }
-  }
-
-  useEffect(() => {
-    if (transcripts.length > 0) {
-      generateExamSpecificInsight();
-    }
-  }, [filters, transcripts]);
-
-  async function generateExamSpecificInsight() {
-    // If we have a filtered set of transcripts, pick the primary one to analyze
-    const activeTranscript = filteredTranscripts[0] || transcripts[0];
-    if (!activeTranscript) return;
-
-    setIsAnalyzing(true);
-    try {
-      // Mocking behavioral signals for the specific exam context
-      // In a real scenario, fetchStudentSignals might take an optional exam_id
-      const signals = await CognitiveCore.fetchStudentSignals(studentId);
-      
-      // Fine-tune signals based on this specific transcript's performance
-      const examSignals = {
-        ...signals,
-        attendanceRate: signals.attendanceRate, // keep base
-        academicPerformanceTrend: activeTranscript.average_score / 100,
-      };
-
-      const trajectory = await TrajectoryForecaster.getTrajectoryMetrics(studentId);
-      const fingerprint = CognitiveCore.computeBehavioralFingerprint(examSignals, trajectory);
-      
-      const insight = await CognitiveCore.generateInsight(
-        studentId, 
-        'academic', 
-        examSignals, 
-        fingerprint, 
-        'student'
-      );
-      setExamSpecificInsight(insight);
-    } catch (error) {
-      console.error("Error generating exam insight:", error);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  }
 
   async function fetchTranscripts() {
     setLoading(true);
@@ -88,7 +39,16 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
       .from("transcripts")
       .select(`
         *,
-        exams(exam_name, academic_year, term, start_date, end_date)
+        exams!inner(
+          id,
+          exam_name, 
+          academic_year, 
+          term, 
+          start_date, 
+          end_date,
+          tuition_event_id
+        ),
+        transcript_items(subject_name)
       `)
       .eq("student_id", studentId)
       .eq("status", "Published")
@@ -102,32 +62,66 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
     setLoading(false);
   }
 
+  async function loadOverallInsights() {
+    try {
+      const insights = await CognitiveCore.getInsightsForDashboard(studentId, 'student', ['success']);
+      if (insights.length > 0) {
+        setOverallInsight(insights[0].insight_text);
+      }
+    } catch (error) {
+      console.error("Error loading overall insights:", error);
+    }
+  }
+
   const filteredTranscripts = transcripts.filter((t: any) => {
     if (!t.exams) return false;
-    if (filters.year && t.exams.academic_year?.toString() !== filters.year) return false;
-    if (filters.term && t.exams.term !== filters.term) return false;
-    if (filters.exam && t.exams.exam_name !== filters.exam) return false;
+    
+    // Type Filter
+    if (eventTypeFilter === "Tuition" && !t.exams.tuition_event_id) return false;
+    if (eventTypeFilter === "Exam" && t.exams.tuition_event_id) return false;
+    
+    // Specific Event Filter
+    if (selectedEventId !== "all" && t.exams.id !== selectedEventId) return false;
+    
     return true;
   });
 
+  // Calculate unique events for the second dropdown based on type
+  const availableEvents = Array.from(new Set(
+    transcripts
+      .filter(t => {
+        if (eventTypeFilter === "Tuition") return !!t.exams.tuition_event_id;
+        if (eventTypeFilter === "Exam") return !t.exams.tuition_event_id;
+        return true;
+      })
+      .map(t => JSON.stringify({ id: t.exams.id, name: t.exams.exam_name }))
+  )).map(s => JSON.parse(s));
+
+  // Pagination Logic
+  const totalPages = Math.ceil(filteredTranscripts.length / pageSize);
+  const paginatedTranscripts = filteredTranscripts.slice(
+    (currentPage - 1) * pageSize,
+    currentPage * pageSize
+  );
+
   const getGradeColor = (grade: string) => {
-    if (grade.startsWith('A')) return "text-green-500 bg-green-500/10 border-green-500/30";
-    if (grade.startsWith('B')) return "text-blue-500 bg-blue-500/10 border-blue-500/30";
-    if (grade.startsWith('C')) return "text-amber-500 bg-amber-500/10 border-amber-500/30";
-    if (grade.startsWith('D')) return "text-orange-500 bg-orange-500/10 border-orange-500/30";
-    return "text-destructive bg-destructive/10 border-destructive/30";
+    if (grade.startsWith('A')) return "text-emerald-500 bg-emerald-500/10 border-emerald-500/20";
+    if (grade.startsWith('B')) return "text-blue-500 bg-blue-500/10 border-blue-500/20";
+    if (grade.startsWith('C')) return "text-amber-500 bg-amber-500/10 border-amber-500/20";
+    if (grade.startsWith('D')) return "text-orange-500 bg-orange-500/10 border-orange-500/20";
+    return "text-destructive bg-destructive/10 border-destructive/20";
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center py-20">
-        <div className="w-8 h-8 border-4 border-primary/30 border-t-primary rounded-full animate-spin" />
+        <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8 animate-in fade-in duration-700">
       {/* Transcript Viewer Modal */}
       {selectedTranscriptId && (
         <StudentTranscriptViewer
@@ -137,171 +131,215 @@ export default function StudentResults({ studentId }: StudentResultsProps) {
       )}
 
       <div className="flex items-center justify-between">
-        <h2 className="text-2xl font-bold text-foreground">Academic Results</h2>
-        <div className="bg-primary/10 text-primary px-4 py-1.5 rounded-full text-sm font-medium">
-          {transcripts.length} Transcript{transcripts.length !== 1 ? 's' : ''} Available
+        <div>
+           <h2 className="text-3xl font-black text-foreground tracking-tighter">Academic Records</h2>
+           <p className="text-sm text-muted-foreground font-medium italic">Your verified performance history</p>
+        </div>
+        <div className="bg-primary/10 text-primary px-4 py-2 rounded-xl text-xs font-black uppercase tracking-[0.2em] border border-primary/20">
+          {filteredTranscripts.length} Records found
         </div>
       </div>
 
-      {/* AI Performance Insight */}
-      {overallInsight && (
-        <div className="relative overflow-hidden bg-card rounded-2xl border border-border/50 p-6 shadow-sm group">
-          <div className="absolute -top-12 -right-12 w-48 h-48 bg-primary/10 rounded-full blur-3xl group-hover:bg-primary/20 transition-all duration-700" />
-          <div className="relative z-10 flex items-start gap-4">
-            <div className="w-10 h-10 bg-primary/20 rounded-xl flex items-center justify-center shrink-0">
-              <Brain className="w-5 h-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="font-bold text-foreground mb-1">Core Performance Insight</h3>
-              <p className="text-xs text-muted-foreground mb-3">AI-Powered Behavioral Analysis</p>
-              <div className="flex items-start gap-3">
-                <Sparkles className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-                <p className="text-sm leading-relaxed text-foreground/90">{overallInsight}</p>
-              </div>
-            </div>
-          </div>
+      {/* Premium Filters */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 bg-card/50 p-6 rounded-[2rem] border border-border/40 backdrop-blur-xl shadow-sm">
+        <div className="space-y-2">
+           <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest px-1">Event Type</label>
+           <select
+             value={eventTypeFilter}
+             onChange={(e) => {
+               setEventTypeFilter(e.target.value as any);
+               setSelectedEventId("all");
+               setCurrentPage(1);
+             }}
+             className="w-full h-11 px-4 bg-background border border-border/50 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+           >
+             <option value="All">All Events</option>
+             <option value="Tuition">Tuition Events</option>
+             <option value="Exam">Exam Events</option>
+           </select>
         </div>
-      )}
+        
+        <div className="space-y-2">
+           <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest px-1">Select Event</label>
+           <select
+             value={selectedEventId}
+             onChange={(e) => {
+               setSelectedEventId(e.target.value);
+               setCurrentPage(1);
+             }}
+             disabled={availableEvents.length === 0}
+             className="w-full h-11 px-4 bg-background border border-border/50 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-primary/20 transition-all cursor-pointer"
+           >
+             <option value="all">All Available</option>
+             {availableEvents.map((event) => (
+               <option key={event.id} value={event.id}>{event.name}</option>
+             ))}
+           </select>
+        </div>
 
-      {/* Exam Specific Analysis */}
-      {(examSpecificInsight || isAnalyzing) && (
-        <div className="bg-gradient-to-br from-accent/10 to-transparent border border-accent/20 rounded-2xl p-6 relative overflow-hidden">
-           <div className="absolute top-0 right-0 p-4 opacity-10">
-              <TrendingUp className="w-24 h-24" />
+        <div className="space-y-2 lg:col-start-4">
+           <label className="text-[10px] font-black text-muted-foreground uppercase tracking-widest px-1">Per Page</label>
+           <div className="flex items-center gap-2">
+              {[10, 20, 50].map(size => (
+                <button
+                  key={size}
+                  onClick={() => {
+                    setPageSize(size);
+                    setCurrentPage(1);
+                  }}
+                  className={`flex-1 h-11 rounded-xl text-xs font-black transition-all border ${
+                    pageSize === size 
+                      ? "bg-primary text-primary-foreground border-primary" 
+                      : "bg-background text-muted-foreground border-border/50 hover:bg-muted"
+                  }`}
+                >
+                  {size}
+                </button>
+              ))}
            </div>
-           <div className="relative z-10">
-              <div className="flex items-center gap-2 mb-3">
-                <Info className="w-4 h-4 text-accent" />
-                <span className="text-[10px] font-black uppercase tracking-widest text-accent">Exam Performance Analysis</span>
-              </div>
-              {isAnalyzing ? (
-                <div className="flex items-center gap-3 py-2">
-                   <div className="w-4 h-4 border-2 border-accent/30 border-t-accent rounded-full animate-spin" />
-                   <p className="text-sm text-muted-foreground italic">Synthesizing exam data...</p>
-                </div>
-              ) : (
-                <p className="text-sm font-medium text-foreground italic leading-relaxed">
-                  "{examSpecificInsight}"
-                </p>
-              )}
-           </div>
         </div>
-      )}
+      </div>
 
-      {/* Filters */}
-      {transcripts.length > 0 && (
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Academic Year</label>
-            <select
-              value={filters.year}
-              onChange={(e) => setFilters({ ...filters, year: e.target.value })}
-              className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
-            >
-              <option value="">All Years</option>
-              {Array.from(new Set(transcripts.filter(t => t.exams?.academic_year).map((t: any) => t.exams.academic_year))).map((year) => (
-                <option key={year} value={year}>{year}</option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Term</label>
-            <select
-              value={filters.term}
-              onChange={(e) => setFilters({ ...filters, term: e.target.value })}
-              className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
-            >
-              <option value="">All Terms</option>
-              {Array.from(new Set(transcripts.filter(t => t.exams?.term).map((t: any) => t.exams.term))).map((term) => (
-                <option key={term} value={term}>{term}</option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-2">
-            <label className="text-sm font-medium text-foreground">Exam</label>
-            <select
-              value={filters.exam}
-              onChange={(e) => setFilters({ ...filters, exam: e.target.value })}
-              className="w-full h-10 px-3 bg-card border border-border/50 rounded-lg text-foreground"
-            >
-              <option value="">All Exams</option>
-              {Array.from(new Set(transcripts.filter(t => t.exams?.exam_name).map((t: any) => t.exams.exam_name))).map((exam) => (
-                <option key={exam} value={exam}>{exam}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-      )}
-
-      {/* Results */}
-      {transcripts.length === 0 ? (
-        <div className="text-center py-20 bg-gradient-to-br from-card/50 to-accent/5 backdrop-blur-xl rounded-2xl border border-border/50">
-          <Trophy className="w-16 h-16 text-muted-foreground mx-auto mb-6 opacity-50" />
-          <p className="text-xl font-semibold text-foreground mb-2">No Transcripts Available</p>
-          <p className="text-muted-foreground max-w-sm mx-auto">
-            Your academic transcripts will appear here once they are published by the administration.
+      {/* Transcript Results Grid - Compact Premium Cards */}
+      {paginatedTranscripts.length === 0 ? (
+        <div className="text-center py-24 bg-card/30 border border-dashed border-border/60 rounded-[3rem]">
+          <Trophy className="w-16 h-16 text-muted-foreground/30 mx-auto mb-6" />
+          <p className="text-xl font-bold text-foreground">No Records Identified</p>
+          <p className="text-sm text-muted-foreground mt-2 max-w-sm mx-auto italic">
+             No academic transcripts match your current filter settings.
           </p>
         </div>
-      ) : filteredTranscripts.length === 0 ? (
-        <div className="text-center py-12 bg-card/50 rounded-xl border border-border/50">
-          <p className="text-muted-foreground">No transcripts match your filters</p>
-        </div>
       ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {filteredTranscripts.map((transcript: any) => (
+        <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+           {paginatedTranscripts.map((transcript: any) => (
             <div
               key={transcript.id}
-              className="bg-card border border-border/50 rounded-xl p-5 hover:border-primary/50 transition-all cursor-pointer group"
+              className="group relative bg-card h-full border border-border/50 rounded-[2.5rem] p-6 sm:p-8 hover:shadow-2xl hover:border-primary/40 transition-all duration-500 cursor-pointer overflow-hidden flex flex-col"
               onClick={() => setSelectedTranscriptId(transcript.id)}
             >
-              <div className="flex items-start justify-between mb-4">
-                <div className="flex-1">
-                  <h3 className="font-semibold text-foreground text-lg mb-1 group-hover:text-primary transition-colors">
-                    {transcript.exams.exam_name}
-                  </h3>
-                  <p className="text-sm text-muted-foreground">
-                    {transcript.exams.term} • {transcript.exams.academic_year}
-                  </p>
-                </div>
-                <div className={`px-3 py-1.5 rounded-lg border font-bold text-xl ${getGradeColor(transcript.overall_grade)}`}>
-                  {transcript.overall_grade}
-                </div>
-              </div>
+              {/* Premium Background Glow */}
+              <div className="absolute top-0 right-0 w-48 h-48 bg-primary/5 rounded-full blur-[80px] -mr-24 -mt-24 group-hover:bg-primary/10 transition-all duration-700" />
+              
+              <div className="relative z-10 flex flex-col h-full space-y-6">
+                 {/* Header: Title & Grade */}
+                 <div className="flex items-start justify-between gap-4">
+                    <div className="space-y-2 flex-1">
+                       <div className="flex items-center gap-2">
+                          <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border border-primary/20 bg-primary/5 text-primary`}>
+                             {transcript.exams.term} • {transcript.exams.academic_year}
+                          </span>
+                          <span className={`px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest border ${transcript.exams.tuition_event_id ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-blue-600/10 text-blue-600 border-blue-600/20'}`}>
+                             {transcript.exams.tuition_event_id ? 'Tuition' : 'Exam'}
+                          </span>
+                       </div>
+                       <h3 className="text-2xl font-black text-foreground tracking-tighter leading-none group-hover:text-primary transition-colors">
+                          {transcript.exams.exam_name}
+                       </h3>
+                    </div>
+                    <div className={`shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-[1.5rem] border-2 flex flex-col items-center justify-center shadow-xl transform group-hover:scale-110 transition-transform duration-500 ${getGradeColor(transcript.overall_grade)}`}>
+                       <span className="text-[10px] font-black opacity-60 uppercase mb-0.5">Grade</span>
+                       <span className="text-2xl sm:text-3xl font-black tracking-tighter leading-none">{transcript.overall_grade}</span>
+                    </div>
+                 </div>
 
-              <div className="grid grid-cols-2 gap-3 mb-4">
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Average</p>
-                  <p className="text-lg font-bold text-foreground">{transcript.average_score.toFixed(1)}%</p>
-                </div>
-                <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground mb-1">Position</p>
-                  <p className="text-lg font-bold text-foreground flex items-center gap-1">
-                    <Trophy className="w-4 h-4 text-amber-500" />
-                    {transcript.class_position}
-                  </p>
-                </div>
-              </div>
+                 {/* Information Grid */}
+                 <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-muted/30 rounded-2xl p-4 border border-border/50 transition-colors group-hover:bg-muted/50">
+                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Average</p>
+                       <p className="text-xl font-black text-foreground">{transcript.average_score.toFixed(1)}%</p>
+                    </div>
+                    <div className="bg-muted/30 rounded-2xl p-4 border border-border/50 transition-colors group-hover:bg-muted/50">
+                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-1">Class Position</p>
+                       <p className="text-xl font-black text-foreground flex items-center gap-2">
+                          <Trophy className="w-4 h-4 text-amber-500" />
+                          {transcript.class_position}
+                       </p>
+                    </div>
+                 </div>
 
-              <div className="flex items-center justify-between pt-3 border-t border-border/50">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <CheckCircle className="w-4 h-4 text-green-500" />
-                  <span>Published</span>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  className="text-primary hover:text-primary/80"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedTranscriptId(transcript.id);
-                  }}
-                >
-                  View
-                  <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
+                 {/* Subjects Highlight */}
+                 <div className="flex-1">
+                    <div className="bg-muted/30 rounded-[2rem] p-5 border border-border/50 relative overflow-hidden group-hover:bg-muted/50 transition-colors">
+                        <div className="absolute top-0 right-0 p-4 opacity-10">
+                           <FileText className="w-8 h-8 text-primary" />
+                        </div>
+                        <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mb-3">Academic Subjects</p>
+                        <div className="flex flex-wrap gap-2">
+                           {(transcript.transcript_items || []).slice(0, 5).map((item: any, idx: number) => (
+                             <span key={idx} className="text-[11px] font-bold text-foreground/80 bg-background/80 px-3 py-1 rounded-lg border border-border/50">
+                                {item.subject_name}
+                             </span>
+                           ))}
+                           {(transcript.transcript_items?.length || 0) > 5 && (
+                             <span className="text-[11px] font-black text-primary px-2 py-1">
+                                +{transcript.transcript_items.length - 5} More
+                             </span>
+                           )}
+                        </div>
+                    </div>
+                 </div>
+
+                 {/* Footer Action */}
+                 <div className="pt-4 mt-auto border-t border-border/50 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                       <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                       <span className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">
+                          Published {new Date(transcript.published_at).toLocaleDateString()}
+                       </span>
+                    </div>
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="h-10 px-6 rounded-xl text-[10px] font-black uppercase tracking-widest bg-primary/5 text-primary border border-primary/10 hover:bg-primary hover:text-white transition-all shadow-sm"
+                    >
+                       Open Report
+                       <ChevronRight className="w-3 h-3 ml-2" />
+                    </Button>
+                 </div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Premium Pagination Support */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-center gap-2 pt-8">
+           <Button
+             variant="outline"
+             size="sm"
+             disabled={currentPage === 1}
+             onClick={() => setCurrentPage(prev => prev - 1)}
+             className="px-4 rounded-xl border-border/50 text-xs font-black uppercase tracking-widest"
+           >
+             Previous
+           </Button>
+           
+           <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button
+                  key={page}
+                  onClick={() => setCurrentPage(page)}
+                  className={`w-9 h-9 rounded-xl text-xs font-black transition-all ${
+                    currentPage === page 
+                      ? "bg-primary text-primary-foreground shadow-lg shadow-primary/20" 
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  {page}
+                </button>
+              ))}
+           </div>
+
+           <Button
+             variant="outline"
+             size="sm"
+             disabled={currentPage === totalPages}
+             onClick={() => setCurrentPage(prev => prev + 1)}
+             className="px-4 rounded-xl border-border/50 text-xs font-black uppercase tracking-widest"
+           >
+             Next
+           </Button>
         </div>
       )}
     </div>

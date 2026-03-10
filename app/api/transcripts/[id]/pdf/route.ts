@@ -44,9 +44,18 @@ export async function GET(
         .eq("status", "Published")
         .maybeSingle(); 
         
-    if (!transcript) return NextResponse.json({ error: "Transcript not found" }, { status: 404 });
-    const { data: settings } = await supabase.from("school_settings").select("*").single();
-    const { data: items } = await supabase.from("transcript_items").select("*").eq("transcript_id", transcriptId).order("subject_name", { ascending: true });
+    if (!transcript) {
+        console.error(`[PDF Service] Transcript ${transcriptId} not found or not published.`);
+        return NextResponse.json({ error: "Transcript not found" }, { status: 404 });
+    }
+    
+    console.log(`[PDF Service] Generating PDF for ${transcript.profiles?.full_name} (${transcript.profiles?.admission_number})`);
+
+    const { data: settings, error: settingsError } = await supabase.from("school_settings").select("*").single();
+    if (settingsError) console.error("[PDF Service] Failed to fetch settings:", settingsError);
+
+    const { data: items, error: itemsError } = await supabase.from("transcript_items").select("*").eq("transcript_id", transcriptId).order("subject_name", { ascending: true });
+    if (itemsError) console.error("[PDF Service] Failed to fetch transcript items:", itemsError);
 
     // Theme Logic
     // Theme Logic
@@ -83,11 +92,17 @@ export async function GET(
     }
     
     const fetchImage = async (url: string) => {
+        if (!url) return null;
         try {
+            console.log(`[PDF Service] Fetching image from: ${url.substring(0, 50)}...`);
             const res = await fetch(url);
-            if (!res.ok) throw new Error("Fetch failed");
-            return new Uint8Array(await res.arrayBuffer());
-        } catch (e) { return null; }
+            if (!res.ok) throw new Error(`Fetch failed with status: ${res.status}`);
+            const buffer = await res.arrayBuffer();
+            return new Uint8Array(buffer);
+        } catch (e) { 
+            console.error(`[PDF Service] Image fetch failed for ${url}:`, e);
+            return null; 
+        }
     };
 
     const centerText = (txt: string, y: number, size: number, font: string, bold: boolean) => {

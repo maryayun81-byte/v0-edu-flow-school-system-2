@@ -119,14 +119,14 @@ export default function AdminTranscriptManager() {
   const [previewTranscript, setPreviewTranscript] = useState<Transcript | null>(null);
   const [adminRemarks, setAdminRemarks] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(15);
+  const [searchTerm, setSearchTerm] = useState("");
   const [settings, setSettings] = useState<SchoolSettings | null>(null);
   const [statusFilter, setStatusFilter] = useState<'all' | 'published' | 'draft'>('all');
   
   // Grading State
   const [gradingScales, setGradingScales] = useState<GradingScale[]>([]);
   const [activeSignature, setActiveSignature] = useState<string | null>(null);
-
-  const itemsPerPage = 20;
 
   useEffect(() => {
     fetchClasses();
@@ -142,7 +142,7 @@ export default function AdminTranscriptManager() {
       if (!systems) return;
 
       // 2. Get scales for all active systems
-      const systemIds = systems.map(s => s.id);
+      const systemIds = systems.map((s: { id: string }) => s.id);
       if (systemIds.length === 0) return;
 
       const { data: scales } = await supabase
@@ -304,7 +304,7 @@ export default function AdminTranscriptManager() {
         
         // Determing Grading System for this student
         const curriculum = student.curriculum_type || '8-4-4'; // Default
-        const activeSystem = activeSystems?.find(s => s.system_type === curriculum);
+        const activeSystem = activeSystems?.find((s: any) => s.system_type === curriculum);
         
         // Get all marks for this student in this exam
         const { data: marks } = await supabase
@@ -323,8 +323,8 @@ export default function AdminTranscriptManager() {
         if (!marks || marks.length === 0) continue;
 
         // Calculate totals (CBC might ignore these for display, but we compute them)
-        const totalScore = marks.reduce((sum, m) => sum + m.score, 0);
-        const totalMaxScore = marks.reduce((sum, m) => sum + m.max_score, 0);
+        const totalScore = marks.reduce((sum: number, m: any) => sum + (m.score || 0), 0);
+        const totalMaxScore = marks.reduce((sum: number, m: any) => sum + (m.max_score || 100), 0);
         const averageScore = totalMaxScore > 0 ? (totalScore / totalMaxScore) * 100 : 0;
 
         // Calculate Items with Student's System
@@ -439,7 +439,7 @@ export default function AdminTranscriptManager() {
         }
 
         // 4. Delete old items for these transcripts (to cleanup before insert)
-        const transcriptIds = savedTranscripts.map(t => t.id);
+        const transcriptIds = savedTranscripts.map((t: any) => t.id);
         if (transcriptIds.length > 0) {
             const { error: deleteError } = await supabase
                 .from("transcript_items")
@@ -650,11 +650,21 @@ export default function AdminTranscriptManager() {
   }
   
   // Filter transcripts for view
-  const filteredTranscripts = transcripts.filter(t => {
-      if (statusFilter === 'all') return true;
-      if (statusFilter === 'published') return t.status === 'Published';
-      if (statusFilter === 'draft') return t.status === 'Draft';
-      return true;
+  const filteredTranscripts = transcripts.filter((t) => {
+    // Status Filter
+    if (statusFilter === 'published' && t.status !== 'Published') return false;
+    if (statusFilter === 'draft' && t.status === 'Published') return false;
+    
+    // Search Filter
+    if (searchTerm) {
+        const searchLower = searchTerm.toLowerCase();
+        return (
+            t.student_name.toLowerCase().includes(searchLower) ||
+            t.admission_number.toLowerCase().includes(searchLower)
+        );
+    }
+    
+    return true;
   });
 
   return (
@@ -1023,112 +1033,183 @@ export default function AdminTranscriptManager() {
       
       {/* Transcript Results Toolbar */}
       {transcripts.length > 0 && (
-         <div className="flex items-center gap-2 bg-card p-2 rounded-lg border border-border/50">
-            <Filter className="w-4 h-4 ml-2 text-muted-foreground" />
-            <Button 
-                variant={statusFilter === 'all' ? 'secondary' : 'ghost'} 
-                size="sm" 
-                onClick={() => setStatusFilter('all')}
-            >
-                All ({transcripts.length})
-            </Button>
-            <Button 
-                variant={statusFilter === 'published' ? 'secondary' : 'ghost'} 
-                size="sm" 
-                onClick={() => setStatusFilter('published')}
-                className="text-green-600"
-            >
-                Published ({transcripts.filter(t => t.status === 'Published').length})
-            </Button>
-            <Button 
-                variant={statusFilter === 'draft' ? 'secondary' : 'ghost'} 
-                size="sm" 
-                onClick={() => setStatusFilter('draft')}
-                className="text-amber-600"
-            >
-                Drafts ({transcripts.filter(t => t.status !== 'Published').length})
-            </Button>
-         </div>
-      )}
+         <div className="flex flex-col md:flex-row items-center justify-between gap-4 bg-card p-4 rounded-xl border border-border/50 shadow-sm">
+            <div className="flex items-center gap-2 w-full md:w-auto">
+                <div className="relative flex-1 md:w-64">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <input 
+                        type="text" 
+                        placeholder="Search student..." 
+                        value={searchTerm}
+                        onChange={(e) => {
+                            setSearchTerm(e.target.value);
+                            setCurrentPage(1);
+                        }}
+                        className="w-full pl-9 h-10 bg-muted/50 border-border/50 rounded-lg text-sm focus:ring-2 focus:ring-primary/20 transition-all"
+                    />
+                </div>
+                <div className="flex items-center gap-1 bg-muted/30 p-1 rounded-lg border border-border/50">
+                    <Button 
+                        variant={statusFilter === 'all' ? 'secondary' : 'ghost'} 
+                        size="sm" 
+                        onClick={() => setStatusFilter('all')}
+                        className="h-8 text-xs font-bold"
+                    >
+                        All
+                    </Button>
+                    <Button 
+                        variant={statusFilter === 'published' ? 'secondary' : 'ghost'} 
+                        size="sm" 
+                        onClick={() => setStatusFilter('published')}
+                        className={`h-8 text-xs font-bold ${statusFilter === 'published' ? 'text-green-600' : ''}`}
+                    >
+                        Published
+                    </Button>
+                    <Button 
+                        variant={statusFilter === 'draft' ? 'secondary' : 'ghost'} 
+                        size="sm" 
+                        onClick={() => setStatusFilter('draft')}
+                        className={`h-8 text-xs font-bold ${statusFilter === 'draft' ? 'text-amber-600' : ''}`}
+                    >
+                        Drafts
+                    </Button>
+                </div>
+            </div>
 
-      {/* Generated Transcripts List */}
+            <div className="flex items-center gap-3 w-full md:w-auto justify-end">
+                <span className="text-xs font-black text-muted-foreground uppercase tracking-widest">Show</span>
+                <div className="flex items-center gap-1">
+                    {[15, 30, 60].map(size => (
+                        <Button
+                            key={size}
+                            variant={pageSize === size ? 'secondary' : 'ghost'}
+                            size="sm"
+                            onClick={() => {
+                                setPageSize(size);
+                                setCurrentPage(1);
+                            }}
+                            className="h-8 w-10 text-xs font-black"
+                        >
+                            {size}
+                        </Button>
+                    ))}
+                </div>
+            </div>
+         </div>
+      )}      {/* Generated Transcripts List */}
       {transcripts.length > 0 && (
         <div className="bg-card border border-border/50 rounded-xl overflow-hidden shadow-sm">
            <div className="overflow-x-auto">
             <table className="w-full">
                <thead className="bg-muted/50 border-b border-border/50">
                   <tr>
-                     <th className="text-left py-3 px-4 font-medium text-muted-foreground text-sm">Student</th>
-                     <th className="text-center py-3 px-4 font-medium text-muted-foreground text-sm">Average</th>
-                     <th className="text-center py-3 px-4 font-medium text-muted-foreground text-sm">Grade</th>
-                     <th className="text-center py-3 px-4 font-medium text-muted-foreground text-sm">Pos</th>
-                     <th className="text-center py-3 px-4 font-medium text-muted-foreground text-sm">Status</th>
-                     <th className="text-right py-3 px-4 font-medium text-muted-foreground text-sm">Actions</th>
+                     <th className="text-left py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Student</th>
+                     <th className="text-left py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Class / Curriculum</th>
+                     <th className="text-left py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Event</th>
+                     <th className="text-center py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Average / Grade</th>
+                     <th className="text-center py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Status</th>
+                     <th className="text-right py-4 px-6 font-black text-muted-foreground text-[10px] uppercase tracking-widest">Actions</th>
                   </tr>
                </thead>
                <tbody className="divide-y divide-border/50">
                   {filteredTranscripts
-                    .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
+                    .slice((currentPage - 1) * pageSize, currentPage * pageSize)
                     .map((transcript) => (
-                      <tr key={transcript.student_id} className="hover:bg-muted/30 transition-colors">
-                        <td className="py-3 px-4">
-                           <p className="font-semibold text-foreground">{transcript.student_name}</p>
-                           <p className="text-xs text-muted-foreground">{transcript.admission_number}</p>
+                      <tr key={transcript.student_id} className="hover:bg-muted/30 transition-colors group">
+                        <td className="py-4 px-6">
+                           <p className="font-bold text-foreground group-hover:text-primary transition-colors">{transcript.student_name}</p>
+                           <p className="text-[10px] font-mono text-muted-foreground uppercase">{transcript.admission_number}</p>
                         </td>
-                        <td className="py-3 px-4 text-center font-mono">
-                           {transcript.average_score.toFixed(1)}%
+                        <td className="py-4 px-6">
+                           <p className="text-sm font-semibold">{classes.find(c => c.id === selectedClass)?.name || 'Unknown'}</p>
+                           <p className="text-[10px] font-bold text-primary/70 uppercase tracking-widest">{selectedCurriculum}</p>
                         </td>
-                        <td className="py-3 px-4 text-center font-bold">
-                           <span className={`px-2 py-0.5 rounded text-xs ${
-                             transcript.overall_grade.startsWith('A') ? 'bg-green-100 text-green-700' :
-                             transcript.overall_grade.startsWith('B') ? 'bg-blue-100 text-blue-700' :
-                             transcript.overall_grade.startsWith('C') ? 'bg-amber-100 text-amber-700' :
-                             'bg-red-100 text-red-700'
-                           }`}>
-                             {transcript.overall_grade}
-                           </span>
+                        <td className="py-4 px-6">
+                           <p className="text-sm font-bold text-foreground/80">{exams.find(e => e.id === selectedExam)?.exam_name || 'Generic Exam'}</p>
+                           <p className="text-[10px] text-muted-foreground font-medium italic">
+                             {transcript.published_at ? new Date(transcript.published_at).toLocaleDateString() : 'Draft'}
+                           </p>
                         </td>
-                        <td className="py-3 px-4 text-center text-sm">
-                            {transcript.class_position}
+                        <td className="py-4 px-6 text-center">
+                           <div className="inline-flex items-center gap-3 bg-muted/50 px-3 py-1.5 rounded-xl border border-border/50">
+                              <span className="font-mono text-sm font-black">{transcript.average_score.toFixed(1)}%</span>
+                              <div className="w-px h-3 bg-border" />
+                              <span className={`text-xs font-black ${
+                                transcript.overall_grade.startsWith('A') ? 'text-green-500' :
+                                transcript.overall_grade.startsWith('B') ? 'text-blue-500' :
+                                transcript.overall_grade.startsWith('C') ? 'text-amber-500' :
+                                'text-red-500'
+                              }`}>
+                                {transcript.overall_grade}
+                              </span>
+                           </div>
                         </td>
-                         <td className="py-3 px-4 text-center">
+                         <td className="py-4 px-6 text-center">
                             {transcript.status === 'Published' ? (
-                                <span className="inline-flex items-center gap-1 text-xs font-medium text-green-600 bg-green-500/10 px-2 py-1 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-green-600 bg-green-500/10 px-3 py-1 rounded-full border border-green-500/20">
                                     <CheckCircle className="w-3 h-3" /> Published
                                 </span>
                             ) : (
-                                <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-600 bg-amber-500/10 px-2 py-1 rounded-full">
+                                <span className="inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-amber-600 bg-amber-500/10 px-3 py-1 rounded-full border border-amber-500/20">
                                     <Lock className="w-3 h-3" /> Draft
                                 </span>
                             )}
                         </td>
-                        <td className="py-3 px-4 text-right flex items-center justify-end gap-2">
-                            {transcript.status !== 'Published' && (
-                                <Button
-                                    size="sm"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        if(confirm("Are you sure you want to publish this transcript?")) {
-                                            handlePublishTranscript(transcript);
-                                        }
+                        <td className="py-4 px-6 text-right">
+                            <div className="flex items-center justify-end gap-2">
+                                <Button 
+                                    size="sm" 
+                                    variant="ghost" 
+                                    className="h-9 w-9 p-0 rounded-xl hover:bg-primary/10 hover:text-primary transition-all"
+                                    onClick={() => {
+                                        setPreviewTranscript(transcript);
+                                        fetchSettings(); 
                                     }}
-                                    className="bg-green-600 hover:bg-green-700 text-white h-8"
+                                    title="View/Preview"
                                 >
-                                    <Send className="w-3 h-3 mr-1" />
-                                    Publish
+                                    <Eye className="w-4 h-4" />
                                 </Button>
-                            )}
-                            <Button 
-                                size="sm" 
-                                variant="ghost" 
-                                onClick={() => {
-                                    setPreviewTranscript(transcript);
-                                    fetchSettings(); 
-                                }}
-                            >
-                                <Eye className="w-4 h-4 mr-2" />
-                                {transcript.status === 'Published' ? 'View' : 'Preview'}
-                            </Button>
+                                {transcript.status === 'Published' && (
+                                    <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-9 w-9 p-0 rounded-xl hover:bg-blue-500/10 hover:text-blue-500 transition-all text-blue-600"
+                                        onClick={() => window.open(`/api/transcripts/${transcript.id}/pdf`, '_blank')}
+                                        title="Download PDF"
+                                    >
+                                        <Download className="w-4 h-4" />
+                                    </Button>
+                                )}
+                                {transcript.status !== 'Published' ? (
+                                    <Button
+                                        size="sm"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if(confirm("Are you sure you want to publish this transcript?")) {
+                                                handlePublishTranscript(transcript);
+                                            }
+                                        }}
+                                        className="bg-primary hover:bg-primary/90 text-primary-foreground h-9 px-4 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-lg shadow-primary/20"
+                                    >
+                                        <Send className="w-3 h-3 mr-2" />
+                                        Publish
+                                    </Button>
+                                ) : (
+                                     <Button
+                                        size="sm"
+                                        variant="outline"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            if(confirm("Regenerate and update this transcript?")) {
+                                                handlePublishTranscript(transcript);
+                                            }
+                                        }}
+                                        className="h-9 border-border/50 text-[10px] font-black uppercase tracking-widest hover:bg-muted"
+                                    >
+                                        Update
+                                    </Button>
+                                )}
+                            </div>
                         </td>
                       </tr>
                     ))}
@@ -1137,27 +1218,55 @@ export default function AdminTranscriptManager() {
            </div>
            
            {/* Pagination */}
-           {filteredTranscripts.length > itemsPerPage && (
-               <div className="flex items-center justify-center gap-4 p-4 border-t border-border/50">
-                    <Button 
-                        size="sm" 
-                        variant="outline"
-                        disabled={currentPage === 1}
-                        onClick={() => setCurrentPage(c => c - 1)}
-                    >
-                        Previous
-                    </Button>
-                    <span className="text-sm text-muted-foreground">
-                        Page {currentPage} of {Math.ceil(filteredTranscripts.length / itemsPerPage)}
-                    </span>
-                    <Button 
-                        size="sm" 
-                        variant="outline"
-                        disabled={currentPage >= Math.ceil(filteredTranscripts.length / itemsPerPage)}
-                        onClick={() => setCurrentPage(c => c + 1)}
-                    >
-                        Next
-                    </Button>
+           {filteredTranscripts.length > pageSize && (
+               <div className="flex items-center justify-between p-6 border-t border-border/50 bg-muted/20">
+                    <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">
+                       Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredTranscripts.length)} of {filteredTranscripts.length} entries
+                    </p>
+                    <div className="flex items-center gap-2">
+                        <Button 
+                            size="sm" 
+                            variant="outline"
+                            disabled={currentPage === 1}
+                            onClick={() => {
+                                setCurrentPage(c => c - 1);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="h-9 px-4 rounded-xl border-border/50 text-[10px] font-black uppercase"
+                        >
+                            Previous
+                        </Button>
+                        <div className="flex items-center gap-1">
+                            {Array.from({ length: Math.ceil(filteredTranscripts.length / pageSize) }, (_, i) => i + 1)
+                                .slice(Math.max(0, currentPage - 3), Math.min(Math.ceil(filteredTranscripts.length / pageSize), currentPage + 2))
+                                .map(page => (
+                                <Button
+                                    key={page}
+                                    variant={currentPage === page ? 'secondary' : 'ghost'}
+                                    size="sm"
+                                    onClick={() => {
+                                        setCurrentPage(page);
+                                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                                    }}
+                                    className="h-9 w-9 rounded-xl text-xs font-black"
+                                >
+                                    {page}
+                                </Button>
+                            ))}
+                        </div>
+                        <Button 
+                            size="sm" 
+                            variant="outline"
+                            disabled={currentPage >= Math.ceil(filteredTranscripts.length / pageSize)}
+                            onClick={() => {
+                                setCurrentPage(c => c + 1);
+                                window.scrollTo({ top: 0, behavior: 'smooth' });
+                            }}
+                            className="h-9 px-4 rounded-xl border-border/50 text-[10px] font-black uppercase"
+                        >
+                            Next
+                        </Button>
+                    </div>
                </div>
            )}
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import {
@@ -25,13 +25,15 @@ import {
   Sparkles,
   Settings,
   MessageSquare,
-  CheckCircle,
+  CheckCircle2,
   Info,
   AlertCircle,
   ShieldAlert,
   BellRing,
   Menu,
+  ArrowRight,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import StudentProfileModal from "@/components/StudentProfileModal";
@@ -51,9 +53,12 @@ import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
 import StudentAttendanceSummary from "@/components/student/StudentAttendanceSummary";
 import AttendanceOverviewCard from "@/components/student/AttendanceOverviewCard";
+import StudentAcademicIntelligence from "@/components/student/StudentAcademicIntelligence";
 import { CognitiveCore, PredictionResult, ClassificationZone } from "@/lib/ai/CognitiveCore";
-
-
+import { ResultsCognitiveCore } from "@/lib/ai/ResultsCognitiveCore";
+import ResultsSubmissionModal from "@/components/student/ResultsSubmissionModal";
+import { ActiveEventBanner } from "@/components/ActiveEventBanner";
+import TuitionEventAd from "@/components/student/TuitionEventAd";
 const supabase = createClient();
 
 interface StudentProfile {
@@ -125,6 +130,8 @@ interface Notification {
   type: string;
   payload?: any;
   is_read?: boolean;
+  audience?: string;
+  target_user_id?: string;
 }
 
 interface Transcript {
@@ -177,13 +184,18 @@ export default function StudentDashboard() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notificationsList, setNotificationsList] = useState<Notification[]>([]);
   const [activeTab, setActiveTab] = useState<
-    "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications" | "attendance"
+    "overview" | "notes" | "assignments" | "timetable" | "quizzes" | "results" | "intelligence" | "leaderboard" | "messages" | "events" | "payments" | "id-card" | "settings" | "notifications" | "attendance"
   >((searchParams?.get("tab") as "overview") || "overview");
   const [searchQuery, setSearchQuery] = useState("");
   const [transcripts, setTranscripts] = useState<Transcript[]>([]);
   const [selectedTranscriptId, setSelectedTranscriptId] = useState<string | null>(null);
   const [transcriptFilters, setTranscriptFilters] = useState({ year: "", term: "", exam: "" });
   const [inference, setInference] = useState<PredictionResult | null>(null);
+  const [activeEvent, setActiveEvent] = useState<any>(null);
+  const [showResultsModal, setShowResultsModal] = useState(false);
+  const [hasSubmittedResults, setHasSubmittedResults] = useState(false);
+  const [showEventAd, setShowEventAd] = useState(false);
+  const [isRegisteredForEvent, setIsRegisteredForEvent] = useState(false);
 
   useEffect(() => {
     const tab = searchParams?.get("tab");
@@ -265,36 +277,151 @@ export default function StudentDashboard() {
     
     // Perform Cognitive Inference
     if (profileData) {
+      // RCCIC: Sync and Check Events
+      await ResultsCognitiveCore.syncEventStatuses();
+      const event = await ResultsCognitiveCore.getActiveEvent();
+      if (event) {
+        setActiveEvent(event);
+        // Check if student already submitted for this event
+        const { data: existing } = await supabase
+          .from('student_results')
+          .select('id')
+          .eq('student_id', profileData.id)
+          .eq('event_id', event.id)
+          .limit(1);
+        
+        setHasSubmittedResults(existing && existing.length > 0);
+      }
+
       const signals = await CognitiveCore.fetchStudentSignals(profileData.id);
-      const result = await CognitiveCore.infer(profileData.id, signals);
+      
+      // RCCIC: Cross-Event Performance Analysis
+      const resultsMetrics = await ResultsCognitiveCore.analyzeCrossEventPerformance(profileData.id);
+      
+      // Augment signals with academic performance from results
+      const augmentedSignals = {
+        ...signals,
+        academicPerformanceTrend: resultsMetrics.averageGradeNumeric
+      };
+
+      const result = await CognitiveCore.infer(profileData.id, augmentedSignals);
       setInference(result);
+
+      // Check for Tuition Event Ad logic
+      await checkEventAdLogic(profileData.id);
     }
 
     setLoading(false);
   }
 
+  async function checkEventAdLogic(userId: string) {
+    try {
+      // 1. Find the latest promoted event
+      const { data: events } = await supabase
+        .from("tuition_events")
+        .select("id, classes_allowed")
+        .eq("status", "active")
+        .eq("is_promoted", true)
+        .gte("end_date", new Date().toISOString().split('T')[0])
+        .order("start_date", { ascending: true })
+        .limit(1);
+
+      if (!events || events.length === 0) return;
+      const event = events[0];
+
+      // 2. Check if student is already registered
+      const { data: reg } = await supabase
+        .from("event_registrations")
+        .select("id")
+        .eq("student_id", userId)
+        .eq("event_id", event.id)
+        .limit(1);
+
+      if (reg && reg.length > 0) {
+        setIsRegisteredForEvent(true);
+        return;
+      }
+
+      // 3. Check frequency capping (3x per day)
+      const today = new Date().toISOString().split('T')[0];
+      const { data: viewData, error: viewErr } = await supabase
+        .from("student_event_ad_views")
+        .select("view_count")
+        .eq("student_id", userId)
+        .eq("event_id", event.id)
+        .eq("last_view_date", today)
+        .single();
+
+      if (viewErr && viewErr.code !== 'PGRST116') throw viewErr;
+
+      const currentCount = viewData?.view_count || 0;
+
+      if (currentCount < 3) {
+        setShowEventAd(true);
+        // Increment view count
+        await supabase
+          .from("student_event_ad_views")
+          .upsert({
+            student_id: userId,
+            event_id: event.id,
+            last_view_date: today,
+            view_count: currentCount + 1
+          }, { onConflict: 'student_id,event_id,last_view_date' });
+      }
+    } catch (err) {
+      console.error("Error in checkEventAdLogic:", err);
+    }
+  }
+
+  // Reactive submission check
+  useEffect(() => {
+    async function checkSubmission() {
+      if (profile?.id && activeEvent?.id) {
+        const { data: existing } = await supabase
+          .from('student_results')
+          .select('id')
+          .eq('student_id', profile.id)
+          .eq('event_id', activeEvent.id)
+          .limit(1);
+        setHasSubmittedResults(existing && existing.length > 0);
+      }
+    }
+    checkSubmission();
+  }, [profile?.id, activeEvent?.id]);
+
+  const [activitiesList, setActivitiesList] = useState<Notification[]>([]); // New state for personalized activities
+
   async function fetchNotifications(userId: string) {
-    // Get unread count
+    // Get unread count (this RPC handles the role/ID logic internally)
     const { data: countData } = await supabase.rpc('get_unread_notification_count', { p_user_id: userId });
     setUnreadCount(countData || 0);
 
-    // Get notifications
+    // Get notifications with role/individual filtering
+    // In a real RLS-heavy app, .select() is enough, but we'll be explicit for safety
     const { data: notifs } = await supabase
       .from('notifications')
       .select(`
         *,
         read_status:notification_reads!left(read_at)
       `)
+      .or(`audience.eq.all,audience.eq.student,target_user_id.eq.${userId}`)
       .order('created_at', { ascending: false });
 
     if (notifs) {
-      // Filter client-side for audience logic that RLS might cover but we want to be explicit
-      // Note: RLS already handles the main security. This is for visual processing if needed.
-      const processedInfos = notifs.map((n: any) => ({
+      // Process notifications
+      const processed = notifs.map((n: any) => ({
         ...n,
         is_read: n.read_status && n.read_status.length > 0
       })) as Notification[];
-      setNotificationsList(processedInfos);
+
+      // Separate "Activities" (e.g., student-specific actions) from general "Notifications"
+      // User specifically asked for tailored activities. 
+      // We'll treat notifications with type 'activity' or those sent specifically to this user as activities.
+      const activities = processed.filter(n => n.type === 'activity' || n.target_user_id === userId);
+      const regularNotifs = processed.filter(n => n.type !== 'activity' && (n.audience === 'all' || n.audience === 'student'));
+
+      setNotificationsList(regularNotifs);
+      setActivitiesList(activities);
     }
 
     // Subscribe to real-time updates
@@ -354,13 +481,40 @@ export default function StudentDashboard() {
     if (!currentProfile?.id) return;
 
     // 1. Fetch Class Enrollments
-    const { data: enrollments } = await supabase
+    const { data: initialEnrollments } = await supabase
       .from('student_classes')
       .select('class_id')
       .eq('student_id', currentProfile.id);
     
+    let activeEnrollments = initialEnrollments || [];
     
-    const classIds = enrollments?.map((e: { class_id: string }) => e.class_id) || [];
+    // Self-healing: if no enrollments but has form_class, try to auto-enroll
+    if (activeEnrollments.length === 0 && currentProfile.form_class) {
+      const lowerClass = currentProfile.form_class.toLowerCase().trim();
+      const { data: classData } = await supabase
+        .from('classes')
+        .select('id')
+        .ilike('name', lowerClass)
+        .single();
+
+      if (classData) {
+        await supabase
+          .from('student_classes')
+          .upsert({
+            student_id: currentProfile.id,
+            class_id: classData.id
+          }, { onConflict: 'student_id,class_id' });
+        
+        // Refresh enrollments
+        const { data: refreshed } = await supabase
+          .from('student_classes')
+          .select('class_id')
+          .eq('student_id', currentProfile.id);
+        if (refreshed) activeEnrollments = refreshed;
+      }
+    }
+    
+    const classIds = activeEnrollments.map((e: { class_id: string }) => e.class_id);
 
     // 2. Fetch Content with class filters
     const [notesRes, assignmentsRes, quizzesRes] = await Promise.all([
@@ -498,8 +652,11 @@ export default function StudentDashboard() {
     
     if (timetableFilter === 'my_subjects') {
       const mySubjects = profile?.subjects || [];
-      return mySubjects.length === 0 || mySubjects.some((subject: string) => 
-        subject.toLowerCase().trim() === t.subject.toLowerCase().trim()
+      // If student hasn't selected subjects or session has no subject, show it
+      if (mySubjects.length === 0 || !t.subject) return true;
+      
+      return mySubjects.some((subject: string) => 
+        subject && t.subject && subject.toLowerCase().trim() === t.subject.toLowerCase().trim()
       );
     }
     return true;
@@ -529,11 +686,37 @@ export default function StudentDashboard() {
 
   return (
     <div className="min-h-screen bg-background">
+      {/* Tuition Event Ad */}
+      {showEventAd && profile && (
+        <TuitionEventAd 
+          studentId={profile.id}
+          studentProfile={profile}
+          onClose={() => setShowEventAd(false)}
+          onRegisterSuccess={() => {
+            setShowEventAd(false);
+            setIsRegisteredForEvent(true);
+            addNotification("Registration Successful! See you at the event.");
+          }}
+        />
+      )}
+
       {/* Profile Completion Modal */}
       {showProfileModal && profile && (
         <StudentProfileModal
           userId={profile.id}
           onComplete={handleProfileComplete}
+        />
+      )}
+
+      {/* RCCIC Results Submission Modal */}
+      {showResultsModal && profile && (
+        <ResultsSubmissionModal
+          studentId={profile.id}
+          onClose={() => setShowResultsModal(false)}
+          onSuccess={() => {
+            setHasSubmittedResults(true);
+            loadProfile(); // Refresh intelligence
+          }}
         />
       )}
 
@@ -605,6 +788,7 @@ export default function StudentDashboard() {
             { id: "attendance", label: "Attendance", icon: BookOpen },
             { id: "quizzes", label: "Quizzes", icon: Brain },
             { id: "results", label: "Results", icon: Trophy },
+            { id: "intelligence", label: "Academic Intelligence", icon: Sparkles },
             { id: "leaderboard", label: "Rankings", icon: Trophy },
             { id: "messages", label: "Messages", icon: MessageSquare },
             { id: "events", label: "Events", icon: Calendar },
@@ -701,6 +885,7 @@ export default function StudentDashboard() {
                     { id: "attendance", label: "Attendance", icon: BookOpen },
                     { id: "quizzes", label: "Quizzes", icon: Brain },
                     { id: "results", label: "Results", icon: Trophy },
+                    { id: "intelligence", label: "AI Intelligence", icon: Sparkles },
                     { id: "notifications", label: "Alerts", icon: Bell },
                     { id: "leaderboard", label: "Rankings", icon: Trophy },
                     { id: "events", label: "Events", icon: Calendar },
@@ -732,311 +917,352 @@ export default function StudentDashboard() {
         )}
 
         {activeTab === "overview" && (
-          <div className="space-y-12 sm:space-y-20 animate-in fade-in slide-in-from-bottom-8 duration-1000">
-            {/* 0. Immersive Welcome Header */}
-            <div className="relative overflow-hidden bg-card rounded-[3rem] p-10 border border-border/50 shadow-2xl group">
-              <div className="absolute -top-24 -right-24 w-96 h-96 bg-primary/20 rounded-full blur-[120px] group-hover:bg-primary/30 transition-all duration-1000 animate-pulse" />
-              <div className="absolute -bottom-24 -left-24 w-96 h-96 bg-accent/20 rounded-full blur-[120px] group-hover:bg-accent/30 transition-all duration-1000" />
-              
-              <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-10">
-                <div className="space-y-6">
-                  <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-muted/50 border border-border/50 rounded-full backdrop-blur-xl">
-                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                    <span className="text-[10px] font-black tracking-[0.2em] uppercase text-muted-foreground/80">Systems Optimal • Cognitive Core Active</span>
-                  </div>
-                  <h1 className="text-5xl md:text-7xl font-black text-foreground tracking-tighter leading-tight">
-                    Hello, <span className="text-primary">{profile?.full_name?.split(" ")[0]}</span>
-                    <span className="block text-xl md:text-2xl font-medium text-muted-foreground tracking-tight mt-2 italic">Ready for today's learning adventure?</span>
-                  </h1>
-                </div>
-                
-                <div className="flex items-center gap-6">
-                  <div className="text-right hidden sm:block">
-                    <p className="text-[10px] font-black text-muted-foreground/60 uppercase tracking-widest mb-1">Session ID</p>
-                    <p className="text-sm font-mono text-primary/60">{profile?.admission_number}</p>
-                  </div>
-                  <div className="w-24 h-24 p-1.5 bg-gradient-to-br from-primary via-accent to-primary rounded-[2rem] shadow-2xl shadow-primary/20 hover:scale-105 transition-transform duration-700">
-                    <div className="w-full h-full rounded-[1.7rem] bg-card flex items-center justify-center overflow-hidden">
-                      {profile?.avatar_url ? (
-                        <img src={profile.avatar_url} alt="Profile" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="text-3xl font-black text-primary">
-                          {profile?.full_name?.charAt(0)}
-                        </div>
-                      )}
-                    </div>
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-8 duration-1000">
+            {/* 1. Banner + Welcome Message */}
+            <div className="space-y-4">
+              {activeEvent && !hasSubmittedResults && (
+                <ActiveEventBanner>
+                  <Button 
+                    onClick={() => setShowResultsModal(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-black uppercase tracking-widest text-[10px] px-6 py-2 rounded-xl shadow-lg shadow-blue-600/30 gap-2"
+                  >
+                    <Trophy className="w-4 h-4" />
+                    Submit Your Marks
+                  </Button>
+                </ActiveEventBanner>
+              )}
+
+              <div className="relative overflow-hidden bg-card rounded-[2.5rem] p-8 border border-border/50 shadow-xl group">
+                <div className="absolute -top-24 -right-24 w-64 h-64 bg-primary/10 rounded-full blur-[80px] pointer-events-none" />
+                <div className="relative z-10 space-y-4">
+                  <h2 className="text-3xl sm:text-4xl font-black text-foreground tracking-tighter">
+                    Good Morning, <span className="text-primary">{profile?.full_name?.split(" ")[0]}</span>!
+                  </h2>
+                  <div className="max-w-3xl">
+                    <p className="text-lg text-muted-foreground font-medium leading-relaxed italic">
+                      Here’s today’s schedule and performance updates. Your progress is monitored by RCCIC for excellence.
+                    </p>
+                    {activeEvent && (
+                      <div className="flex items-center gap-2 mt-4">
+                         <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                         <p className="text-sm font-bold text-primary/80 uppercase tracking-widest">
+                            Active Evaluation: {activeEvent.name || activeEvent.event_name}
+                         </p>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
             </div>
 
-            {/* 1. Unified Success Index (Top Priority - Visually Dominant) */}
-            {inference && (
-              <div className="relative flex flex-col items-center justify-center text-center py-10 px-6 sm:py-16 bg-gradient-to-b from-primary/10 via-background to-background rounded-[3rem] border border-white/5 shadow-[0_0_100px_rgba(var(--primary),0.05)] overflow-hidden">
-                {/* Core Brain Visualization Glow */}
-                <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] bg-primary/20 rounded-full blur-[120px] animate-pulse" />
-                
-                <div className="relative z-10 space-y-8 w-full max-w-2xl">
-                   {/* Motivational Caption */}
-                   <div className="space-y-2">
-                     <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-muted/50 border border-border/50 rounded-full backdrop-blur-xl mb-4">
-                       <Sparkles className="w-4 h-4 text-primary animate-bounce" />
-                       <span className="text-[11px] font-black tracking-[0.2em] uppercase text-foreground/80">Intelligent Learning Companion</span>
-                     </div>
-                     <h2 className="text-3xl sm:text-5xl font-black text-foreground tracking-tight leading-[1.1]">
-                        {inference.motivationalCaption}
-                     </h2>
-                   </div>
-
-                   {/* Radial Progress Engine */}
-                   <div className="relative w-64 h-64 sm:w-80 sm:h-80 mx-auto group">
-                      <svg className="w-full h-full -rotate-90">
-                        {/* Background Path */}
-                        <circle cx="50%" cy="50%" r="45%" fill="transparent" stroke="currentColor" strokeWidth="2" className="opacity-[0.05]" />
-                        {/* Animated Intelligence Ring */}
-                        <circle
-                          cx="50%"
-                          cy="50%"
-                          r="45%"
-                          fill="transparent"
-                          stroke="url(#luxuryGradient)"
-                          strokeWidth="12"
-                          strokeDasharray="100%"
-                          strokeDashoffset={`${100 - (inference.successScore * 100)}%`}
-                          strokeLinecap="round"
-                          className="transition-all duration-[3000ms] ease-out shadow-[0_0_30px_rgba(var(--primary),0.5)]"
-                          style={{
-                             strokeDasharray: "283%", // Approx 2 * PI * 45% of 100
-                             strokeDashoffset: `${283 - (283 * inference.successScore)}%`
-                          }}
-                        />
-                        <defs>
-                          <linearGradient id="luxuryGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor="var(--primary)" />
-                            <stop offset="50%" stopColor="var(--accent)" />
-                            <stop offset="100%" stopColor="var(--primary)" />
-                          </linearGradient>
-                        </defs>
-                      </svg>
-                      
-                      {/* Inner Data Layer */}
-                      <div className="absolute inset-0 flex flex-col items-center justify-center">
-                         {/* Trajectory Velocity Vector (The One Feature That Makes This Platform Legendary) */}
-                         {inference.trajectory && (
-                            <div className={`absolute top-14 flex items-center gap-1.5 px-3 py-1 rounded-full bg-muted/50 border border-border/50 backdrop-blur-md animate-pulse shadow-xl ${
-                              inference.trajectory.successGain >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                            }`}>
-                               {inference.trajectory.successGain >= 0 ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                               <span className="text-[9px] font-black uppercase tracking-[0.2em]">
-                                 {inference.trajectory.successGain >= 0 ? 'Rising Momentum' : 'Stability Alert'}
-                               </span>
-                            </div>
-                         )}
-
-                         <div className="text-6xl sm:text-8xl font-black text-foreground tracking-tighter tabular-nums drop-shadow-2xl">
-                           {Math.round(inference.successScore * 100)}
+            {/* 2. Performance Quadrails */}
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+              {[
+                { 
+                  label: 'Attendance Stability', 
+                  value: inference ? `${Math.round((1 - (inference.riskSignals.attendance || 0)) * 100)}%` : '...', 
+                  icon: Clock, 
+                  color: (inference?.riskSignals.attendance || 0) > 0.3 ? 'text-rose-400' : 'text-emerald-400',
+                  bg: 'from-emerald-500/10 to-transparent',
+                  tab: 'attendance'
+                },
+                { 
+                  label: 'Engagement Velocity', 
+                  value: inference ? `${Math.round((inference.successScore || 0.5) * 100)}%` : '...', 
+                  icon: Zap, 
+                  color: (inference?.successScore || 0) < 0.4 ? 'text-rose-400' : 'text-indigo-400',
+                  bg: 'from-primary/10 to-transparent',
+                  tab: 'intelligence'
+                },
+                { 
+                  label: 'Payment Reliability', 
+                  value: inference ? `${Math.round((1 - (inference.riskSignals.payment || 0)) * 100)}%` : '...', 
+                  icon: CreditCard, 
+                  color: (inference?.riskSignals.payment || 0) > 0.5 ? 'text-rose-400' : 'text-blue-400',
+                  bg: 'from-blue-500/10 to-transparent',
+                  tab: 'payments'
+                },
+                { 
+                  label: 'Academic Trend', 
+                  value: inference ? (inference.successScore > 0.6 ? 'Rising' : 'Stable') : '...', 
+                  icon: TrendingUp, 
+                  color: inference?.successScore ? (inference.successScore > 0.6 ? 'text-emerald-400' : 'text-amber-400') : 'text-muted-foreground',
+                  bg: 'from-amber-500/10 to-transparent',
+                  tab: 'results'
+                }
+              ].map((card, i) => (
+                <div 
+                   key={i} 
+                   onClick={() => setActiveTab(card.tab as any)}
+                   className="relative overflow-hidden bg-card border border-border/50 rounded-2xl p-6 transition-all hover:scale-[1.02] shadow-sm cursor-pointer group"
+                >
+                   <div className={`absolute top-0 right-0 w-24 h-24 bg-gradient-to-br ${card.bg} rounded-full blur-3xl opacity-30`} />
+                   <div className="relative z-10 flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                         <div className={`p-2 rounded-xl bg-white/5 border border-white/5 ${card.color}`}>
+                            <card.icon className="w-5 h-5" />
                          </div>
-                         <div className="flex flex-col items-center mt-[-10px]">
-                            <div className="text-[10px] sm:text-xs font-black text-primary uppercase tracking-[0.3em]">
-                               {inference.progressZoneLabel || "Success Index"}
-                            </div>
-                            <div className={`mt-3 px-4 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border transition-all duration-1000 ${
-                              inference.successScore > 0.85 ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[0_0_20px_rgba(16,185,129,0.1)]' :
-                              inference.successScore > 0.6 ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30 shadow-[0_0_20px_rgba(99,102,241,0.1)]' :
-                              inference.successScore > 0.3 ? 'bg-amber-500/20 text-amber-400 border-amber-500/30 shadow-[0_0_20px_rgba(245,158,11,0.1)]' :
-                              'bg-rose-500/20 text-rose-400 border-rose-500/30 shadow-[0_0_20px_rgba(244,63,94,0.1)]'
-                            }`}>
-                               {inference.zone}
-                            </div>
-                         </div>
-                      </div>
-                   </div>
-
-                   {/* Layer 2: Simple Meaning Statement */}
-                   <div className="mt-6 p-6 bg-muted/30 border border-border/50 rounded-2xl backdrop-blur-md max-w-md mx-auto">
-                      <p className="text-sm text-foreground/70 font-medium leading-relaxed italic">
-                         "{inference.meaningStatement || "Your learning rhythm is being analyzed by the CCIC neural engine."}"
-                      </p>
-                   </div>
-                </div>
-              </div>
-            )}
-
-            {/* 2. AI Insight Narrative Panel (Mentorship Style) */}
-            {inference && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-12 items-center px-4 sm:px-0">
-                <div className="lg:col-span-7 space-y-6">
-                   <div className="flex items-center gap-3">
-                      <div className="w-12 h-12 rounded-2xl bg-primary/20 flex items-center justify-center shadow-lg shadow-primary/10">
-                         <Brain className="w-6 h-6 text-primary" />
+                         <div className={`w-2 h-2 rounded-full ${card.color.replace('text-', 'bg-')} animate-pulse`} />
                       </div>
                       <div>
-                        <h3 className="text-lg font-black text-foreground uppercase tracking-wider">Mentorship Intelligence</h3>
-                        <p className="text-xs text-muted-foreground font-bold uppercase tracking-widest">Real-time Guidance Layer</p>
-                      </div>
-                   </div>
-
-                   <div className="relative p-8 bg-card border border-border/50 rounded-[2.5rem] backdrop-blur-3xl shadow-2xl group overflow-hidden">
-                      <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-100 transition-opacity">
-                         <Zap className="w-12 h-12 text-primary" />
-                      </div>
-                      <p className="text-xl sm:text-2xl font-medium text-foreground leading-relaxed tracking-tight italic">
-                        "{inference.insights[0]}"
-                      </p>
-                      <div className="mt-8 flex items-center gap-4">
-                         <div className="flex -space-x-2">
-                            {[1,2,3].map(i => (
-                              <div key={i} className="w-8 h-8 rounded-full border-2 border-background bg-muted flex items-center justify-center text-[10px] font-bold text-foreground">
-                                {i}
-                              </div>
-                            ))}
-                         </div>
-                         <p className="text-xs text-primary font-black uppercase tracking-widest">Correlated with {Math.round(inference.successScore * 100)}+ metrics</p>
+                         <p className="text-2xl font-black text-foreground tracking-tighter">{card.value}</p>
+                         <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{card.label}</p>
                       </div>
                    </div>
                 </div>
-                 {/* 3. Risk Signal Indicators (Compact Viz) */}
-                 <div className="lg:col-span-5 space-y-8">
-                    <h4 className="text-sm font-black text-muted-foreground uppercase tracking-[0.3em]">Performance Guardrails</h4>
-                    <div className="grid grid-cols-2 gap-6">
-                       {[
-                         { label: 'Attendance', value: 1 - inference.riskSignals.attendance, color: 'primary', icon: Clock },
-                         { label: 'Payment', value: 1 - inference.riskSignals.payment, color: 'accent', icon: CreditCard },
-                         { label: 'Engagement', value: 1 - inference.riskSignals.engagement, color: 'yellow-500', icon: Zap },
-                         { label: 'Academic', value: 1 - inference.riskSignals.academic, color: 'emerald-400', icon: TrendingUp }
-                       ].map((sig) => (
-                         <div key={sig.label} className="space-y-3 group">
-                            <div className="flex items-center justify-between">
-                               <div className="flex items-center gap-2">
-                                  <sig.icon className={`w-3.5 h-3.5 text-${sig.color} opacity-70`} />
-                                  <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{sig.label}</span>
-                               </div>
-                               <span className={`text-xs font-black ${sig.value < 0.5 ? 'text-destructive' : 'text-emerald-400'}`}>
-                                 {Math.round(sig.value * 100)}%
-                               </span>
-                            </div>
-                            <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
-                               <div
-                                 className={`h-full rounded-full transition-all duration-1000 group-hover:opacity-80 ${sig.value >= 0.75 ? 'bg-emerald-500' : sig.value >= 0.5 ? 'bg-amber-500' : 'bg-destructive'}`}
-                                 style={{ width: `${sig.value * 100}%` }}
-                               />
-                            </div>
-                         </div>
-                       ))}
-                    </div>
-                    <div className="p-4 bg-muted/50 border border-border/50 rounded-2xl">
-                       <p className="text-[10px] text-muted-foreground leading-relaxed">
-                         Performance indicators are calculated by the CCIC using your real attendance, payment, engagement, and academic data. Green indicates strong performance; red signals areas for improvement.
-                       </p>
-                    </div>
-                 </div>
-              </div>
-            )}
+              ))}
+            </div>
 
-            {/* 4. Support & Engagement Visualization Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-               {/* Left: Attendance Visualization */}
-               <div className="lg:col-span-5">
-                  {profile && (
-                    <AttendanceOverviewCard 
-                      studentId={profile.id} 
-                      onViewFull={() => setActiveTab("attendance")}
-                    />
-                  )}
-               </div>
+            {/* 2.5 Secondary Quick Actions (Missing Stats) */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                {[
+                  { label: 'Available Resources', value: notes.length, icon: FileText, color: 'text-blue-500', bg: 'bg-blue-500/10', tab: 'notes', desc: 'Study notes' },
+                  { label: 'Pending Quizzes', value: quizzes.length, icon: Brain, color: 'text-purple-500', bg: 'bg-purple-500/10', tab: 'quizzes', desc: 'Self-assessment' },
+                  { label: 'Active Submissions', value: hasSubmittedResults ? 'Completed' : 'Pending', icon: CheckCircle2, color: hasSubmittedResults ? 'text-emerald-500' : 'text-amber-500', bg: 'bg-emerald-500/10', tab: 'results', desc: 'Event results' }
+                ].map((item, i) => (
+                   <div 
+                      key={i}
+                      onClick={() => setActiveTab(item.tab as any)}
+                      className="flex items-center gap-4 bg-muted/30 hover:bg-muted/50 border border-border/50 p-5 rounded-3xl transition-all cursor-pointer group"
+                   >
+                       <div className={`w-12 h-12 rounded-2xl ${item.bg} ${item.color} flex items-center justify-center`}>
+                          <item.icon className="w-6 h-6" />
+                       </div>
+                       <div className="flex-1">
+                          <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{item.label}</p>
+                          <p className="text-lg font-black text-foreground">{item.value}</p>
+                       </div>
+                       <ChevronRight className="w-4 h-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-all" />
+                   </div>
+                ))}
+            </div>
 
-               {/* Right: Quick Intelligence Summary Cards */}
-               <div className="lg:col-span-7 grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {[
-                    { id: 'notes', label: 'Knowledge Base', count: notes.length, icon: BookOpen, sub: 'Available Resources', color: 'from-blue-500/20 to-indigo-500/20' },
-                    { id: 'assignments', label: 'Active Missions', count: pendingAssignments.length, icon: Target, sub: 'Pending Submissions', color: 'from-emerald-500/20 to-teal-500/20' },
-                    { id: 'quizzes', label: 'Neural Tests', count: quizzes.length, icon: Brain, sub: 'Skills Assessment', color: 'from-purple-500/20 to-pink-500/20' },
-                    { id: 'events', label: 'Social Sync', count: 2, icon: Users, sub: 'Upcoming Events', color: 'from-amber-500/20 to-orange-500/20' }
-                  ].map((card) => (
-                    <div 
-                      key={card.id}
-                      onClick={() => setActiveTab(card.id as any)}
-                      className="group relative overflow-hidden bg-card border border-border/50 rounded-[2rem] p-6 cursor-pointer hover:bg-muted/50 transition-all duration-500"
-                    >
-                      <div className={`absolute inset-0 bg-gradient-to-br ${card.color} opacity-0 group-hover:opacity-100 transition-opacity duration-700`} />
-                      <div className="relative z-10 flex justify-between items-start">
-                         <div className="space-y-4">
-                            <div className="w-10 h-10 rounded-xl bg-muted border border-border/50 flex items-center justify-center group-hover:scale-110 transition-transform">
-                               <card.icon className="w-5 h-5 text-muted-foreground" />
-                            </div>
-                            <div>
-                               <p className="text-3xl font-black text-foreground tracking-tighter">{card.count}</p>
-                               <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{card.label}</p>
-                            </div>
-                         </div>
-                         <div className="text-[9px] font-bold text-muted-foreground/60 uppercase tracking-tight">{card.sub}</div>
+            {/* Premium Tuition Event Card */}
+            <div 
+              onClick={() => isRegisteredForEvent ? setActiveTab("events") : setShowEventAd(true)}
+              className={cn(
+                "relative overflow-hidden border rounded-[2.5rem] p-8 transition-all cursor-pointer group flex items-center justify-between shadow-xl",
+                isRegisteredForEvent 
+                  ? "bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10" 
+                  : "bg-gradient-to-br from-indigo-500/10 to-indigo-600/5 border-indigo-500/20 hover:shadow-indigo-500/10 hover:scale-[1.01]"
+              )}
+            >
+              <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-[100px] -mr-32 -mt-32" />
+              
+              <div className="relative z-10 flex items-center gap-8">
+                <div className={cn(
+                  "w-20 h-20 rounded-3xl flex items-center justify-center shrink-0 border shadow-2xl transition-transform group-hover:scale-110 duration-500",
+                  isRegisteredForEvent 
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" 
+                    : "bg-indigo-600 text-white border-indigo-400/30"
+                )}>
+                  {isRegisteredForEvent ? <CheckCircle2 className="w-10 h-10" /> : <Sparkles className="w-10 h-10" />}
+                </div>
+                
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className={cn(
+                      "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
+                      isRegisteredForEvent ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500" : "bg-indigo-500/10 border-indigo-500/20 text-indigo-500"
+                    )}>
+                      {isRegisteredForEvent ? "Status: Registered" : "Premium Event"}
+                    </span>
+                    {!isRegisteredForEvent && (
+                      <div className="px-3 py-1 bg-amber-500 text-black rounded-full text-[10px] font-black animate-pulse shadow-lg shadow-amber-500/20">
+                        LIMITED SEATS
                       </div>
+                    )}
+                  </div>
+                  <h3 className="text-2xl font-black text-foreground tracking-tight">
+                    {isRegisteredForEvent ? "Revision Bootcamp Confirmed" : "Elite Tuition Revision Bootcamp"}
+                  </h3>
+                  <p className="text-muted-foreground text-sm max-w-md font-medium">
+                    {isRegisteredForEvent 
+                      ? "You're all set! Check your schedule for session timings and materials." 
+                      : "Join top-performing students for an intensive revision period. Mastering difficult topics with 1-on-1 support."}
+                  </p>
+                </div>
+              </div>
+
+              <div className="relative z-10 flex flex-col items-end gap-3">
+                <Button 
+                  onClick={() => isRegisteredForEvent ? setActiveTab('results') : null}
+                  className={cn(
+                    "rounded-2xl px-8 h-12 font-black text-xs uppercase tracking-widest shadow-lg transition-all active:scale-95",
+                    isRegisteredForEvent 
+                      ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20" 
+                      : "bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-600/20"
+                  )}
+                >
+                  {isRegisteredForEvent ? "VIEW DETAILS" : "REGISTER NOW"}
+                  <ArrowRight className="w-4 h-4 ml-2" />
+                </Button>
+                {!isRegisteredForEvent && (
+                  <p className="text-[10px] font-bold text-indigo-400 uppercase tracking-tighter">
+                    <Users className="w-3 h-3 inline mr-1" /> 42 students already joined
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* 3. Key High-Value Stats Card */}
+            <div className="grid grid-cols-1 gap-4">
+               <div 
+                 onClick={() => setActiveTab('intelligence')}
+                 className="relative overflow-hidden bg-primary/5 border border-primary/20 rounded-[2.5rem] p-8 shadow-2xl cursor-pointer group hover:bg-primary/10 transition-all"
+               >
+                  <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-primary/10 rounded-full blur-[120px] -mr-64 -mt-64" />
+                  <div className="relative z-10 flex flex-col md:flex-row items-center gap-10">
+                    <div className="flex flex-col items-center justify-center w-32 h-32 rounded-[2rem] bg-primary/20 border border-primary/30 shadow-2xl shrink-0">
+                       <Sparkles className="w-10 h-10 text-primary mb-1" />
+                       <span className="text-2xl font-black text-primary tracking-tighter">{inference ? `${Math.round(inference.successScore * 100)}` : '...'}</span>
+                       <span className="text-[8px] font-black text-primary uppercase tracking-[0.2em]">Index</span>
                     </div>
-                  ))}
+                    <div className="space-y-4 text-center md:text-left">
+                       <h3 className="text-xl font-bold text-foreground uppercase tracking-tight">Success Index Analytics</h3>
+                       <p className="text-muted-foreground leading-relaxed max-w-2xl">
+                          Your current Success Index is <span className="text-primary font-bold">{Math.round((inference?.successScore || 0.5) * 100)}%</span>. RCCIC predicts a <span className="text-primary font-bold">{inference?.zone || 'Balanced'}</span> academic trajectory. Engagement levels: <span className="text-primary font-bold">Optimal</span>.
+                       </p>
+                       <div className="flex flex-wrap justify-center md:justify-start gap-4 pt-2">
+                          <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5">
+                             <div className="w-2 h-2 rounded-full bg-primary" />
+                             <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">GPA: {inference?.successScore ? (inference.successScore * 4).toFixed(2) : '3.6'}</span>
+                          </div>
+                          <div className="flex items-center gap-2 px-4 py-2 bg-white/5 rounded-xl border border-white/5">
+                             <div className="w-2 h-2 rounded-full bg-emerald-500" />
+                             <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">Level: Optimal</span>
+                          </div>
+                       </div>
+                    </div>
+                  </div>
                </div>
             </div>
 
-            {/* 5. Trend Mini Analytics / Timeline */}
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-               {/* Daily Session Re-styled */}
-               {todayClasses.length > 0 && (
-                 <div className="bg-card border border-border/50 rounded-[3rem] p-8 space-y-8">
-                    <div className="flex items-center justify-between">
-                       <h3 className="text-xl font-black text-foreground tracking-tight flex items-center gap-3">
-                         <Calendar className="w-5 h-5 text-primary" />
-                         Schedule Sync
-                       </h3>
-                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{todayClasses.length} Events Today</p>
+            {/* 3. Today’s Schedule Section */}
+            {todayClasses.length > 0 ? (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between px-2">
+                   <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                     <Calendar className="w-5 h-5 text-primary" />
+                     Today's Schedule
+                   </h3>
+                   <span className="text-xs font-bold text-muted-foreground uppercase tracking-widest">{todayDay}, {new Date().toLocaleDateString()}</span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {todayClasses.map((session) => (
+                    <div key={session.id} className="group flex items-center justify-between p-4 bg-card border border-border/50 rounded-2xl hover:border-primary/30 transition-all shadow-sm">
+                       <div className="flex items-center gap-4">
+                          <div className="flex flex-col items-center justify-center w-12 h-12 rounded-xl bg-muted border border-border/50 group-hover:bg-primary/10 group-hover:border-primary/20 transition-all">
+                             <span className="text-sm font-black text-foreground">{session.start_time.split(":")[0]}</span>
+                             <span className="text-[9px] font-bold text-muted-foreground uppercase">{session.start_time.split(":")[1]?.includes('00') ? 'AM' : 'PM'}</span>
+                          </div>
+                          <div>
+                             <p className="font-bold text-foreground group-hover:text-primary transition-colors">{session.title}</p>
+                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">{session.subject}</p>
+                          </div>
+                       </div>
+                       <div className="text-[10px] font-mono text-muted-foreground/60">
+                          {session.start_time} - {session.end_time}
+                       </div>
                     </div>
-                    <div className="space-y-4">
-                       {todayClasses.map((session, i) => (
-                         <div key={session.id} className="group flex items-center gap-6 p-4 bg-muted/50 rounded-2xl border border-transparent hover:border-primary/20 transition-all">
-                            <div className="flex flex-col items-center min-w-[50px]">
-                               <span className="text-sm font-black text-foreground">{session.start_time.split(":")[0]}</span>
-                               <span className="text-[9px] font-bold text-muted-foreground uppercase">AM</span>
-                            </div>
-                            <div className="h-10 w-px bg-border/50" />
-                            <div className="flex-1">
-                               <p className="text-base font-bold text-foreground group-hover:text-primary transition-colors">{session.title}</p>
-                               <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{session.subject}</p>
-                            </div>
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity">
-                               <ChevronRight className="w-5 h-5 text-primary" />
-                            </div>
-                         </div>
-                       ))}
-                    </div>
-                 </div>
-               )}
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="p-12 text-center bg-muted/30 border border-dashed border-border/60 rounded-[2rem]">
+                 <Clock className="w-12 h-12 text-muted-foreground/40 mx-auto mb-4" />
+                 <p className="text-muted-foreground font-medium">No sessions scheduled today.</p>
+                 <button onClick={() => setActiveTab('timetable')} className="mt-4 text-xs font-black text-primary uppercase tracking-widest hover:underline">Check upcoming tasks & Schedule</button>
+              </div>
+            )}
 
-               {/* Recent Mission Briefings */}
-               {pendingAssignments.length > 0 && (
-                 <div className="bg-card border border-border/50 rounded-[3rem] p-8 space-y-8">
-                    <div className="flex items-center justify-between">
-                       <h3 className="text-xl font-black text-foreground tracking-tight flex items-center gap-3">
-                         <Target className="w-5 h-5 text-emerald-400" />
-                         Mission Intel
-                       </h3>
-                       <p className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{pendingAssignments.length} Active</p>
+            {/* 4. Upcoming Tasks Section */}
+            {pendingAssignments.length > 0 && (
+              <div className="space-y-6">
+                <div className="flex items-center justify-between px-2">
+                   <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                     <Target className="w-5 h-5 text-emerald-400" />
+                     Upcoming Tasks
+                   </h3>
+                   <Button variant="ghost" size="sm" onClick={() => setActiveTab('assignments')} className="text-xs font-black uppercase tracking-widest text-primary">View All</Button>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {pendingAssignments.slice(0, 4).map((assignment) => (
+                    <div 
+                      key={assignment.id} 
+                      onClick={() => setActiveTab("assignments")}
+                      className="group flex items-center justify-between p-5 bg-card border border-border/50 rounded-2xl hover:border-emerald-500/30 cursor-pointer shadow-sm transition-all"
+                    >
+                       <div className="space-y-1.5">
+                          <p className="font-bold text-foreground group-hover:text-emerald-400 transition-colors tracking-tight">{assignment.title}</p>
+                          <div className="flex items-center gap-2">
+                             <div className={`w-1.5 h-1.5 rounded-full ${new Date(assignment.due_date).getTime() - new Date().getTime() < 86400000 ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'}`} />
+                             <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Due {new Date(assignment.due_date).toLocaleDateString()}</p>
+                          </div>
+                       </div>
+                       <ChevronRight className="w-5 h-5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-all" />
                     </div>
-                    <div className="space-y-4">
-                       {pendingAssignments.slice(0, 3).map((assignment) => (
-                         <div key={assignment.id} onClick={() => setActiveTab("assignments")} className="group flex items-center justify-between p-5 bg-muted/50 rounded-2xl border border-transparent hover:border-emerald-500/20 cursor-pointer transition-all">
-                            <div className="space-y-1">
-                               <p className="text-base font-bold text-foreground group-hover:text-emerald-400 transition-colors tracking-tight">{assignment.title}</p>
-                               <div className="flex items-center gap-2">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                                  <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">Due in {new Date(assignment.due_date).getDate() - new Date().getDate()} days</p>
-                               </div>
-                            </div>
-                            <div className="w-10 h-10 rounded-xl bg-muted border border-border/50 flex items-center justify-center">
-                               <ChevronRight className="w-4 h-4 text-emerald-400 mt-[-2px]" />
-                            </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 5. Intelligence Insights Section */}
+            {inference && (
+              <div className="space-y-6">
+                 <div className="flex items-center justify-between px-2">
+                   <h3 className="text-xl font-bold text-foreground flex items-center gap-2">
+                     <Brain className="w-5 h-5 text-primary" />
+                     Academic Insights
+                   </h3>
+                   <Button variant="ghost" size="sm" onClick={() => setActiveTab('intelligence')} className="text-xs font-black uppercase tracking-widest text-primary">View All Insights</Button>
+                </div>
+                <div className="grid grid-cols-1 gap-4">
+                   {inference.insights.slice(0, 1).map((insight, idx) => (
+                     <div key={idx} className="relative overflow-hidden bg-card border border-border/40 rounded-[2rem] p-6 shadow-sm group">
+                        <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-100 transition-opacity">
+                           <Zap className="w-8 h-8 text-primary" />
+                        </div>
+                        <div className="flex gap-4">
+                           <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+                              <Sparkles className="w-5 h-5 text-primary" />
+                           </div>
+                           <p className="text-base font-medium text-foreground leading-relaxed italic pr-8">
+                             "{insight}"
+                           </p>
+                        </div>
+                     </div>
+                   ))}
+                </div>
+              </div>
+            )}
+
+             {/* 6. Recent Academic Activity Section */}
+            <div className="space-y-6">
+               <div className="flex items-center gap-2 px-2">
+                  <TrendingUp className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-xl font-bold text-foreground">Recent Academic Activity</h3>
+               </div>
+               <div className="bg-card border border-border/40 rounded-[2.5rem] divide-y divide-border/30 overflow-hidden shadow-sm">
+                  {activitiesList.slice(0, 5).length > 0 ? (
+                    activitiesList.slice(0, 5).map((notif) => (
+                      <div key={notif.id} className="p-5 flex items-start gap-4 hover:bg-muted/50 transition-colors">
+                         <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${notif.type === 'urgent' ? 'bg-red-500/10 text-red-500' : 'bg-blue-500/10 text-blue-500'}`}>
+                            {notif.type === 'urgent' ? <AlertCircle className="w-5 h-5" /> : <Info className="w-5 h-5" />}
                          </div>
-                       ))}
+                         <div className="flex-1">
+                            <p className="text-sm font-bold text-foreground">{notif.title}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{notif.message}</p>
+                            <p className="text-[10px] text-muted-foreground/60 mt-2 font-mono uppercase tracking-widest">{new Date(notif.created_at).toLocaleDateString()}</p>
+                         </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-12 text-center text-muted-foreground italic">
+                       No recent academic activities logged.
                     </div>
-                 </div>
-               )}
+                  )}
+               </div>
             </div>
           </div>
         )}
@@ -1087,7 +1313,7 @@ export default function StudentDashboard() {
                     switch (type) {
                       case 'success': 
                         return { 
-                          icon: CheckCircle, 
+                          icon: CheckCircle2, 
                           color: "text-green-500", 
                           bg: "bg-green-500/10",
                           border: "border-green-500/20"
@@ -1233,11 +1459,13 @@ export default function StudentDashboard() {
                   {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
                     const daySessions = timetable.filter(t => t.day_of_week === day);
                     const filteredSessions = timetableFilter === 'my_subjects' 
-                      ? daySessions.filter(s => 
-                          profile?.subjects?.some((subject: string) => 
-                            subject.toLowerCase().trim() === s.subject.toLowerCase().trim()
-                          )
-                        )
+                      ? daySessions.filter(s => {
+                          const mySubjects = profile?.subjects || [];
+                          if (mySubjects.length === 0 || !s.subject) return true;
+                          return mySubjects.some((subject: string) => 
+                            subject && s.subject && subject.toLowerCase().trim() === s.subject.toLowerCase().trim()
+                          );
+                        })
                       : daySessions;
                     return (
                       <div key={day} className="space-y-2">
@@ -1275,11 +1503,13 @@ export default function StudentDashboard() {
                   {['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'].map(day => {
                     const daySessions = timetable.filter(t => t.day_of_week === day);
                     const filteredSessions = timetableFilter === 'my_subjects' 
-                      ? daySessions.filter(s => 
-                          profile?.subjects?.some((subject: string) => 
-                            subject.toLowerCase().trim() === s.subject.toLowerCase().trim()
-                          )
-                        )
+                      ? daySessions.filter(s => {
+                          const mySubjects = profile?.subjects || [];
+                          if (mySubjects.length === 0 || !s.subject) return true;
+                          return mySubjects.some((subject: string) => 
+                            subject && s.subject && subject.toLowerCase().trim() === s.subject.toLowerCase().trim()
+                          );
+                        })
                       : daySessions;
                     if (filteredSessions.length === 0) return null;
                     
@@ -1398,6 +1628,13 @@ export default function StudentDashboard() {
         {/* Results Tab */}
         {activeTab === "results" && profile?.id && (
           <StudentResults studentId={profile.id} />
+        )}
+
+        {/* Academic Results Intelligence Tab */}
+        {activeTab === "intelligence" && profile?.id && (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-700">
+            <StudentAcademicIntelligence studentId={profile.id} />
+          </div>
         )}
 
         {/* Settings Tab */}

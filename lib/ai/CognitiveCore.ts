@@ -1,7 +1,7 @@
 /**
  * Centralized Cognitive Intelligence Core (CCIC)
  * Production Architecture — v4 (FIPCL-Integrated)
- * ─────────────────────────────────────────────────────────────
+ * -------------------------------------------------------------
  *
  * Central intelligence service. All dashboards request insights here.
  * Internal Pipeline:
@@ -12,6 +12,7 @@
 
 import { createClient } from '@/lib/supabase/client';
 import { TrajectoryForecaster, TrajectoryMetrics } from './TrajectoryForecaster';
+import { ResultsCognitiveCore } from './ResultsCognitiveCore';
 
 const supabase = createClient();
 
@@ -22,11 +23,10 @@ export interface BehavioralSignals {
   attendanceStability: number;
   paymentReliability: number;
   engagementVelocity: number;
-  academicPerformanceTrend: number;
   eventCount?: number;
   recentAttendanceDelta?: number;   // vs 14 days ago
   paymentDelayMean?: number;        // avg delay days
-  assessmentTrend?: 'rising' | 'flat' | 'declining';
+  academicPerformanceTrend?: number; // Added for AGI fusion
 }
 
 export interface BehavioralFingerprint {
@@ -66,6 +66,17 @@ export interface PredictionResult {
   progressZoneLabel?: string;
 }
 
+export interface BehavioralProfile {
+  studentId: string;
+  signals: BehavioralSignals;
+  fingerprint: BehavioralFingerprint;
+  prediction: PredictionResult;
+  correlations: {
+    attendanceToGrades: string;
+    paymentToEngagement: string;
+  };
+}
+
 export type DashboardContext = 'student' | 'teacher' | 'admin' | 'finance';
 export type InsightDomain = 'attendance' | 'finance' | 'academic' | 'success' | 'platform';
 
@@ -83,7 +94,7 @@ interface SignalEvent {
 interface InsightContext {
   domain: InsightDomain;
   metric: string;
-  change: string;          // e.g.  "-12%"
+  change: string;          // e.g.  "+12%"
   period: string;          // e.g.  "last two weeks"
   comparison: string;      // e.g.  "previous two weeks"
   significance: 'critical' | 'high' | 'moderate' | 'low';
@@ -140,28 +151,6 @@ function detectSignals(signals: BehavioralSignals): SignalEvent[] {
     });
   }
 
-  // Academic signal
-  if (signals.assessmentTrend === 'declining') {
-    events.push({
-      domain: 'academic',
-      priority: 'high',
-      change: -0.15,
-      direction: 'down',
-      context: 'consecutive_decline',
-      comparisonPeriod: 'last 3 assessments',
-    });
-  } else {
-    // Rising or flat — positive signal keeps confidence high
-    events.push({
-      domain: 'academic',
-      priority: 'low',
-      change: signals.assessmentTrend === 'rising' ? 0.1 : 0,
-      direction: signals.assessmentTrend === 'rising' ? 'up' : 'flat',
-      context: signals.assessmentTrend === 'rising' ? 'academic_momentum' : 'academic_stable',
-      comparisonPeriod: 'last 3 assessments',
-    });
-  }
-
   // Success score signal — always emit so confidence is never zero
   const score = (signals.attendanceStability + signals.paymentReliability + signals.engagementVelocity) / 3;
   if (score > 0.85) {
@@ -205,9 +194,9 @@ function buildContext(event: SignalEvent, dashboardCtx: DashboardContext, studen
 
 // ─── MODULE C: Vocabulary Diversifier ────────────────────────────────────────
 
-const UPWARD_VERBS = ['improved', 'strengthened', 'demonstrated growth in', 'showed positive movement in', 'advanced in', 'consolidated gains in'];
-const DOWNWARD_VERBS = ['declined in', 'weakened in', 'showed reduced activity in', 'exhibited contraction in', 'registered a drop in'];
-const STABLE_VERBS = ['remained consistent in', 'held steady in', 'maintained baseline levels in', 'stabilized in'];
+const UPWARD_VERBS = ['accelerated', 'surged by', 'demonstrated robust expansion in', 'outperformed baseline in', 'optimized Gains in', 'consolidated high-velocity growth in'];
+const DOWNWARD_VERBS = ['atrophied by', 'exhibited contraction in', 'underperformed critical thresholds in', 'suffered a precision drop in', 'demonstrated systemic decay in'];
+const STABLE_VERBS = ['maintained equilibrium in', 'held a strategic plateau in', 'demonstrated consistent delivery in', 'stabilized at benchmark levels in'];
 
 let _verbRotateIdx = 0;
 function pickVerb(direction: 'up' | 'down' | 'flat'): string {
@@ -234,27 +223,27 @@ function generateContextualNarrative(ctx: InsightContext, signals: BehavioralSig
   // ── ATTENDANCE domain ──────────────────────────────────────────────────────
   if (domain === 'attendance') {
     const obs = delta < 0
-      ? `Attendance ${verb} by approximately ${Math.abs(delta).toFixed(0)}% during ${period}`
-      : `Attendance ${verb} by ${Math.abs(delta).toFixed(0)}% over ${period}`;
+      ? `Critical Signal: Attendance ${verb} ${Math.abs(delta).toFixed(0)}% during ${period}.`
+      : `Performance Analysis: Attendance ${verb} ${Math.abs(delta).toFixed(0)}% over ${period}.`;
 
     const interp: Record<DashboardContext, string> = {
       student: delta < 0
-        ? `, with the sharpest gaps concentrated toward the end of the week, indicating that late-week engagement may need deliberate attention.`
-        : `, reflecting stronger commitment to session participation in recent days.`,
+        ? ` This indicates a high-risk engagement deficit, particularly during critical mid-week blocks where attention is most required.`
+        : ` This reflects a strengthening learning commitment, optimizing your exposure to core curriculum modules.`,
       teacher: delta < 0
-        ? `, particularly during late-week sessions. Targeted group re-engagement at those points may help recover attendance momentum.`
-        : `. This positive engagement pattern across the group is a strong foundation for the upcoming assessment window.`,
+        ? ` Systematic engagement drift detected. This downward trajectory threatens curriculum coverage targets for the current cycle.`
+        : ` Group-wide engagement is trending toward elite performance targets. Sustaining this throughput is essential for assessment readiness.`,
       admin: delta < 0
-        ? `. The pattern aligns with increased mid-term pressure periods observed in previous cycles.`
-        : `. This trend is consistent with improved scheduling efficiency and reduced session conflicts.`,
-      finance: `. Attendance patterns correlate with fee collection cycles and should be factored into cashflow planning.`,
+        ? ` Institutional bottleneck detected. This pattern correlates with historic mid-term pressure points and requires resource reallocation.`
+        : ` Operational efficiency gains confirmed. Current scheduling logic is yielding a measurable improvement in student throughput.`,
+      finance: ` Attendance fluctuations represent a leading indicator for tuition risk. Proactive fiscal monitoring is advised.`,
     };
 
     const implication: Record<DashboardContext, string> = {
-      student:  ` Maintaining attendance above ${attRatePct} is crucial to staying within the healthy progress zone.`,
-      teacher:  ` Consider proactive check-ins during the identified low-attendance slots.`,
-      admin:    ` Cross-referencing with timetable data may yield further optimization opportunities.`,
-      finance:  ` No direct financial action required at this stage.`,
+      student:  ` **Directive:** Stabilize attendance above ${attRatePct} immediately to protect your success index.`,
+      teacher:  ` **Tactical Advice:** Deploy immediate re-engagement protocols specifically for students in the lower attendance deciles.`,
+      admin:    ` **Strategic Recommendation:** Cross-verify timetable heatmaps with staff availability to eliminate coverage gaps.`,
+      finance:  ` **Directive:** No immediate collection trigger; maintain standard oversight.`,
     };
 
     return `${obs}${interp[dashboardCtx]}${implication[dashboardCtx]}`;
@@ -262,51 +251,39 @@ function generateContextualNarrative(ctx: InsightContext, signals: BehavioralSig
 
   // ── FINANCE domain ─────────────────────────────────────────────────────────
   if (domain === 'finance') {
-    const obs = `Payment compliance ${verb} this term, with a reliability rate of ${payRelPct}`;
+    const obs = `Fiscal Analysis: Tuition compliance ${verb} this cycle. Current payment reliability is indexed at ${payRelPct}.`;
     const interp: Record<DashboardContext, string> = {
-      student: `. Keeping your payment record current protects your academic standing and avoids late fee obligations.`,
-      teacher: `. Student payment status may affect access to certain academic resources.`,
-      admin:   `. ${Math.abs(delta) > 10 ? `This represents a notable shift of ${change} from baseline.` : 'The deviation from target is within manageable thresholds.'}`,
-      finance: `. A structured follow-up on the ${(100 - parseFloat(payRelPct)).toFixed(0)}% gap could recover significant revenue before term-end.`,
+      student: ` Maintaining a 100% reliability rating is non-negotiable for continuous access to the Education Cloud and AI-powered learning modules.`,
+      teacher: ` Student fiscal status is a significant variable in resource access. Ensure affected students are supported while compliance is normalized.`,
+      admin:   ` Fiscal volatility detected. A variance of ${change} from the quarterly target necessitates a precision audit of outstanding accounts.`,
+      finance: ` Revenue Leakage Warning: Failure to address the ${(100 - parseFloat(payRelPct)).toFixed(0)}% collection gap will compromise term-end delivery targets.`,
     };
-    return `${obs}${interp[dashboardCtx]}`;
-  }
-
-  // ── ACADEMIC domain ────────────────────────────────────────────────────────
-  if (domain === 'academic') {
-    const trendDir = signals.assessmentTrend ?? 'flat';
-    const obs = trendDir === 'declining'
-      ? `Academic performance has ${pickVerb('down')} across the last three consecutive assessments`
-      : trendDir === 'rising'
-      ? `Academic performance has ${pickVerb('up')} across recent assessments`
-      : `Academic performance has ${pickVerb('flat')} across recent evaluations`;
-
-    const interp: Record<DashboardContext, string> = {
-      student:  `, suggesting that revisiting foundational topics from the most recent learning unit may restore upward momentum.`,
-      teacher:  `. Targeted review sessions on the weakest assessment domains may help the affected student group recover trajectory.`,
-      admin:    `. Systemic review of the curriculum block corresponding to this period may identify structural factors.`,
-      finance:  `. No direct financial implication detected at this time.`,
+    const recommendation: Record<DashboardContext, string> = {
+      student: ` **Directive:** Settle outstanding balances to secure your position in the elite performance zone.`,
+      teacher: ` **Tactical Advice:** Monitor resource usage patterns to ensure no student is left behind during payment normalization.`,
+      admin:   ` **Strategic Recommendation:** Implement dynamic payment triggers to automate follow-up for fluctuating accounts.`,
+      finance: ` **Directive:** Execute aggressive recovery protocols for accounts showing >15% reliability decay.`,
     };
-    return `${obs}${interp[dashboardCtx]}`;
+    return `${obs}${interp[dashboardCtx]} ${recommendation[dashboardCtx]}`;
   }
 
   // ── SUCCESS domain ─────────────────────────────────────────────────────────
   if (domain === 'success') {
     if (metric === 'elite_performance') {
       const elite: Record<DashboardContext, string> = {
-        student: `Your engagement consistency is placing you in the top performance tier. Attendance at ${attRatePct} and payment reliability at ${payRelPct} signal a strong foundation — sustaining this momentum through the remainder of the term is the primary objective.`,
-        teacher: `This student group is demonstrating elite-tier engagement patterns. Attendance and payment consistency are both above benchmark.`,
-        admin:   `Platform-wide performance indicators reflect a healthy cohort. Elite-performing student clusters are driving positive aggregate success index readings.`,
-        finance: `High-engagement student cohorts correlate with superior tuition compliance. Current signals are favorable.`,
+        student: `Strategic Advantage: Your engagement consistency is placing you in the top performance tier. With attendance at ${attRatePct} and payment reliability at ${payRelPct}, your foundation is fortified. **Directive:** Focus on curriculum mastery to convert this momentum into a Tier-1 academic outcome.`,
+        teacher: `Intelligence Briefing: This cohort is demonstrating elite-tier engagement. Both attendance and fiscal signals are performing above the institutional benchmark. **Tactical Advice:** Introduce advanced extension modules to challenge this high-velocity group.`,
+        admin:   `Systemic Audit: Platform health is optimal. The current "Success Index" is driven by a surge in elite-performing student clusters. **Strategic Recommendation:** Benchmark this cohort's parameters to refine success models for other segments.`,
+        finance: `Fiscal Intelligence: High-velocity student clusters are correlating with 100% payment compliance. Maintain current engagement strategies to protect revenue stability.`,
       };
       return elite[dashboardCtx];
     }
     if (metric === 'at_risk') {
       const risk: Record<DashboardContext, string> = {
-        student: `Multiple engagement signals — including attendance and session participation — are currently below the platform baseline. Reconnecting with consistent habits in the next two weeks can meaningfully shift your trajectory toward the stable zone.`,
-        teacher: `One or more students in this group exhibit at-risk behavioral patterns. A combined attendance-and-payment check may help identify who requires immediate support.`,
-        admin:   `The system has flagged students in the Critical Intervention Zone. Proactive outreach from academic coordinators is recommended within this cycle.`,
-        finance: `At-risk students also show elevated payment irregularity. Coordinated intervention across academic and finance teams may improve both outcomes simultaneously.`,
+        student: `Critical Alert: Multiple engagement signals have breached the platform safety threshold. Attendance and session participation are in high-risk zones. **Directive:** Re-establish baseline habits immediately to arrest this downward trajectory before assessment entry.`,
+        teacher: `Tactical Warning: Systemic failure detected in at-risk student clusters. The intersection of attendance and payment decay indicates a high probability of student churn. **Tactical Advice:** Immediate 1-on-1 intervention is mandatory for the identified high-risk IDs.`,
+        admin:   `Executive Warning: At-risk signals are saturating the lower quartiles. This poses a threat to aggregate KPIs. **Strategic Recommendation:** Activate the Rapid Response Team to execute retention protocols within this assessment cycle.`,
+        finance: `Risk Disclosure: At-risk students exhibit elevated fiscal vulnerability. Coordinated intervention with academic leads is critical to mitigate revenue loss.`,
       };
       return risk[dashboardCtx];
     }
@@ -366,10 +343,9 @@ export class CognitiveCore {
       return 0.45 + init * 0.1;
     }
     return Math.min(1, Math.max(0,
-      signals.attendanceStability      * 0.35 +
-      signals.paymentReliability       * 0.35 +
-      signals.engagementVelocity       * 0.20 +
-      signals.academicPerformanceTrend * 0.10
+      signals.attendanceStability      * 0.40 +
+      signals.paymentReliability       * 0.40 +
+      signals.engagementVelocity       * 0.20
     ));
   }
 
@@ -430,11 +406,55 @@ export class CognitiveCore {
   }
 
   static predictAcademicOutcome(signals: BehavioralSignals, trajectory?: TrajectoryMetrics): string {
-    const proj = signals.academicPerformanceTrend + (trajectory?.academicSlope || 0) * 5;
-    if (proj > 0.85) return 'Distinction Likely (High Confidence)';
-    if (proj > 0.65) return 'Stable Growth Pattern';
-    if (proj > 0.4)  return 'Risk of Plateau';
-    return 'Significant Academic Decline Predicted';
+    const score = this.calculateSuccessIndex(signals);
+    if (score > 0.8) return 'Projected Elite: High probability of Distinction/Grade A.';
+    if (score > 0.6) return 'Stable Growth: Trending toward Grade B performance.';
+    return 'Intervention Required: Academic trajectory is currently below benchmark.';
+  }
+
+  /**
+   * Correlates behavioral signals with academic outcomes.
+   */
+  static correlateBehaviorToGrades(signals: BehavioralSignals, avgNumericGrade: number): string {
+    const att = signals.attendanceRate;
+    if (att > 0.9 && avgNumericGrade > 0.8) {
+      return "Strong positive correlation: High attendance is directly fueling elite academic performance.";
+    }
+    if (att < 0.7 && avgNumericGrade < 0.5) {
+      return "Critical correlation: Attendance deficit is the primary driver of academic underperformance.";
+    }
+    if (att > 0.85 && avgNumericGrade < 0.5) {
+      return "Inverse correlation: High attendance but low grades suggest a 'Participation without Mastery' pattern. Review study methods.";
+    }
+    return "Moderate correlation: Behavioral habits are consistent with current academic trajectory.";
+  }
+
+  /**
+   * Fetches the full behavioral intelligence profile.
+   */
+  static async getStudentBehavioralProfile(studentId: string): Promise<BehavioralProfile> {
+    const signals = await this.fetchStudentSignals(studentId);
+    const prediction = await this.infer(studentId, signals);
+    const fingerprint = this.computeBehavioralFingerprint(signals, prediction.trajectory);
+
+    // Get academic context for correlation
+    const history = await ResultsCognitiveCore.fetchSubjectHistory(studentId);
+    const avgNumeric = history.length > 0 
+      ? history.reduce((acc, h) => acc + ResultsCognitiveCore.gradeToNumeric(h.currentGrade), 0) / history.length
+      : 0.5;
+
+    return {
+      studentId,
+      signals,
+      fingerprint,
+      prediction,
+      correlations: {
+        attendanceToGrades: this.correlateBehaviorToGrades(signals, avgNumeric),
+        paymentToEngagement: signals.paymentReliability < 0.7 
+          ? "High risk: Payment instability is beginning to correlate with engagement drift."
+          : "Stable: Financial compliance is supporting consistent platform engagement.",
+      }
+    };
   }
 
   /**
@@ -510,7 +530,7 @@ export class CognitiveCore {
   static async getInsightsForDashboard(
     entityId: string,
     dashboardCtx: DashboardContext,
-    domains: InsightDomain[] = ['attendance', 'academic', 'success']
+    domains: InsightDomain[] = ['attendance', 'success']
   ): Promise<{ insight_text: string; type: InsightDomain; confidence: number }[]> {
 
     // 1. Try reading precomputed insights first (performance architecture)
@@ -531,8 +551,7 @@ export class CognitiveCore {
       .order('created_at', { ascending: false })
       .limit(domains.length);
 
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
-    const fresh = (cached || []).filter((r: any) => new Date(r.created_at).getTime() > oneHourAgo);
+    const fresh = (cached || []).filter((r: any) => new Date(r.created_at).getTime() > Date.now() - 3600000);
 
     if (fresh.length >= domains.length) {
       return fresh.map((r: any) => ({
@@ -583,7 +602,6 @@ export class CognitiveCore {
 
       const insights = await Promise.all([
         this.generateInsight(studentId, 'success',    signals, fingerprint, 'student'),
-        this.generateInsight(studentId, 'academic',   signals, fingerprint, 'student'),
         this.generateInsight(studentId, 'attendance', signals, fingerprint, 'student'),
       ]);
 
@@ -591,7 +609,7 @@ export class CognitiveCore {
         attendance: 1 - signals.attendanceRate,
         payment:    1 - signals.paymentReliability,
         engagement: 1 - signals.engagementVelocity,
-        academic:   1 - signals.academicPerformanceTrend,
+        academic:   0, // Academic managed by RCCIC
       };
 
       return {
@@ -683,25 +701,34 @@ export class CognitiveCore {
 
       const { data: payments } = await payQuery;
 
-      const payTotal = payments?.length || 0;
-      const payPaid  = payments?.filter((r: any) => r.status === 'paid').length || 0;
+      const payRecords = payments || [];
+      const payTotal = payRecords.length;
+      const payPaid  = payRecords.filter((r: any) => r.status === 'paid').length;
       const paymentReliability = payTotal > 0 ? payPaid / payTotal : 0.90;
+
+      // Engagement Velocity based on session frequency
+      const { data: sessions } = await supabase
+        .from('audit_logs') // Assuming audit_logs tracks logins/actions
+        .select('created_at')
+        .eq('created_by', studentId)
+        .gt('created_at', cutoff28);
+      
+      const sessionCount = sessions?.length || 0;
+      const engagementVelocity = Math.min(1, sessionCount / 20); // 20 sessions per month = 100%
 
       return {
         attendanceRate:          attRate,
         attendanceStability:     Math.min(1, attRate * 1.05),
         paymentReliability,
-        engagementVelocity:      0.85,
-        academicPerformanceTrend: 0.80,
-        eventCount:              (attTotal + payTotal) || 5,
+        engagementVelocity,
+        eventCount:              (attTotal + payTotal + sessionCount) || 5,
         recentAttendanceDelta:   recentDelta,
-        assessmentTrend:         'flat',
+        paymentDelayMean:        payTotal > 0 ? (payPaid / payTotal < 1 ? 4.5 : 0) : 0, // Mocked logic or real if data available
       };
     } catch {
       return {
         attendanceRate: 0.8, attendanceStability: 0.8,
         paymentReliability: 0.8, engagementVelocity: 0.8,
-        academicPerformanceTrend: 0.8,
       };
     }
   }

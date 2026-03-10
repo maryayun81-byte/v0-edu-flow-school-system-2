@@ -280,6 +280,22 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
       }
     }
 
+    // Log academic activity for the dashboard
+    try {
+      if (studentId) {
+        await supabase.from('notifications').insert({
+          title: 'Quiz Completed',
+          message: `You completed the quiz "${quiz.title}" with a score of ${Math.round((totalScore / totalPoints) * 100)}%`,
+          type: 'activity',
+          audience: 'individual',
+          target_user_id: studentId,
+          created_by: studentId
+        });
+      }
+    } catch (err) {
+      console.error('Error logging quiz activity:', err);
+    }
+
     // Celebration effect
     if (totalScore / totalPoints >= 0.7) {
       confetti({

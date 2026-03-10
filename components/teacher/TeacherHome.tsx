@@ -215,7 +215,8 @@ export default function TeacherHome({ userId, userName, onNavigate }: TeacherHom
       // 7. Recent Activity (from Notifications table is best source of truth)
       const { data: notifications } = await supabase
         .from('notifications')
-        .or(`target_user_id.eq.${userId},target_role.eq.teacher`)
+        .select('*')
+        .or(`target_user_id.eq.${userId},target_role.eq.teacher,audience.eq.teacher,audience.eq.all`)
         .order('created_at', { ascending: false })
         .limit(5);
 

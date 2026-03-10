@@ -28,6 +28,10 @@ import {
   RefreshCw,
   ChevronDown,
   ChevronUp,
+  Users,
+  GraduationCap,
+  Trophy,
+  Sparkles,
 } from "lucide-react";
 
 const supabase = createClient();
@@ -48,6 +52,9 @@ interface TuitionEvent {
   attendance_threshold: number;
   status: "upcoming" | "active" | "completed" | "cancelled";
   tuition_fee: number;
+  classes_allowed?: string[];
+  active_status?: boolean;
+  is_promoted?: boolean;
   created_at: string;
 }
 
@@ -63,7 +70,34 @@ interface KenyanHoliday {
   name: string;
 }
 
-const EMPTY_FORM = {
+interface Registration {
+  id: string;
+  student_id: string;
+  event_id: string;
+  name: string;
+  class: string;
+  school: string;
+  phone: string;
+  registered_at: string;
+}
+
+interface FormData {
+  name: string;
+  location: string;
+  description: string;
+  start_date: string;
+  end_date: string;
+  attendance_eval_days: number;
+  exam_day_number: number;
+  days_of_operation: string[];
+  excluded_dates_text: string;
+  attendance_threshold: number;
+  tuition_fee: number;
+  classes_allowed_text: string;
+  is_promoted: boolean;
+}
+
+const EMPTY_FORM: FormData = {
   name: "",
   location: "",
   description: "",
@@ -75,6 +109,8 @@ const EMPTY_FORM = {
   excluded_dates_text: "", // comma separated
   attendance_threshold: 80,
   tuition_fee: 0,
+  classes_allowed_text: "Form 3, Form 4, Grade 1, Grade 2, Grade 3, Grade 4, Grade 5, Grade 6, Grade 7, Grade 8, Grade 9, Grade 10",
+  is_promoted: true,
 };
 
 const statusConfig: Record<string, { label: string; color: string }> = {
@@ -97,6 +133,9 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
   const [eventCalendars, setEventCalendars] = useState<Record<string, EventCalendarEntry[]>>({});
   const [generatingCalendar, setGeneratingCalendar] = useState<string | null>(null);
   const [holidays, setHolidays] = useState<KenyanHoliday[]>([]);
+  const [registrations, setRegistrations] = useState<Registration[]>([]);
+  const [view, setView] = useState<"events" | "registrations">("events");
+  const [selectedEventId, setSelectedEventId] = useState<string>("all");
 
   useEffect(() => {
     fetchEvents();
@@ -125,6 +164,26 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
       .order("holiday_date");
     if (data) setHolidays(data);
   }
+
+  async function fetchRegistrations() {
+    let query = supabase
+      .from("event_registrations")
+      .select("*")
+      .order("registered_at", { ascending: false });
+    
+    if (selectedEventId !== "all") {
+      query = query.eq("event_id", selectedEventId);
+    }
+
+    const { data } = await query;
+    if (data) setRegistrations(data);
+  }
+
+  useEffect(() => {
+    if (view === "registrations") {
+      fetchRegistrations();
+    }
+  }, [view, selectedEventId]);
 
   async function fetchEvents() {
     setLoading(true);
@@ -243,6 +302,8 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
       excluded_dates_text: (event.excluded_dates || []).join(", "),
       attendance_threshold: event.attendance_threshold,
       tuition_fee: event.tuition_fee || 0,
+      classes_allowed_text: ((event as any).classes_allowed || []).join(", "),
+      is_promoted: (event as any).is_promoted ?? true,
     });
     setError("");
     setShowForm(true);
@@ -286,6 +347,8 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
       excluded_dates: excluded,
       attendance_threshold: formData.attendance_threshold,
       tuition_fee: formData.tuition_fee,
+      classes_allowed: formData.classes_allowed_text.split(",").map(c => c.trim()).filter(Boolean),
+      is_promoted: formData.is_promoted,
       created_by: adminId,
     };
 
@@ -316,9 +379,14 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
   }
 
   async function handleStatusChange(eventId: string, newStatus: string) {
+    const isActive = newStatus === "active";
     await supabase
       .from("tuition_events")
-      .update({ status: newStatus, updated_at: new Date().toISOString() })
+      .update({ 
+        status: newStatus, 
+        active_status: isActive,
+        updated_at: new Date().toISOString() 
+      })
       .eq("id", eventId);
     fetchEvents();
   }
@@ -333,6 +401,28 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
 
   return (
     <div className="space-y-6">
+      {/* View Switcher */}
+      <div className="flex items-center gap-2 p-1 bg-muted rounded-xl border border-border/50 w-fit">
+        <button
+          onClick={() => setView("events")}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+            view === "events" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Event Management
+        </button>
+        <button
+          onClick={() => setView("registrations")}
+          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+            view === "registrations" ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Registration Tracking
+        </button>
+      </div>
+
+      {view === "events" ? (
+        <>
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
@@ -456,6 +546,28 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
                 onChange={e => setFormData(p => ({ ...p, tuition_fee: parseFloat(e.target.value) || 0 }))}
                 className="bg-muted border-border/50 font-bold text-emerald-400"
               />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Allowed Classes (Comma-separated)</Label>
+              <Input
+                placeholder="e.g., Form 3, Grade 9"
+                value={formData.classes_allowed_text}
+                onChange={e => setFormData(p => ({ ...p, classes_allowed_text: e.target.value }))}
+                className="bg-muted border-border/50"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-8">
+              <input 
+                type="checkbox"
+                id="is_promoted"
+                checked={formData.is_promoted}
+                onChange={e => setFormData(p => ({ ...p, is_promoted: e.target.checked }))}
+                className="w-4 h-4 rounded border-border"
+              />
+              <Label htmlFor="is_promoted" className="cursor-pointer">Promote this event to students (Ad System)</Label>
             </div>
           </div>
 
@@ -698,6 +810,94 @@ export default function TuitionEventManager({ adminId }: { adminId: string }) {
               </div>
             );
           })}
+        </div>
+      )}
+        </>
+      ) : (
+        <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
+          {/* Registrations Header & Filter */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <h2 className="text-xl font-bold text-foreground">Event Registrations</h2>
+              <p className="text-sm text-muted-foreground">Track student sign-ups across all tuition programs</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <Label className="text-xs uppercase font-bold text-muted-foreground whitespace-nowrap">Filter Event:</Label>
+              <Select value={selectedEventId} onValueChange={setSelectedEventId}>
+                <SelectTrigger className="w-[200px] bg-card border-border/50">
+                  <SelectValue placeholder="All Events" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Events</SelectItem>
+                  {events.map(e => (
+                    <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Quick Stats Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { label: "Total Registrations", value: registrations.length, icon: Users, color: "text-indigo-400" },
+              { label: "Form 4 Capacity", value: registrations.filter(r => r.class.includes("4")).length, icon: GraduationCap, color: "text-emerald-400" },
+              { label: "Revenue Share (Est)", value: `KSh ${registrations.length * 500}`, icon: Trophy, color: "text-amber-400" },
+              { label: "New Today", value: registrations.filter(r => new Date(r.registered_at).toDateString() === new Date().toDateString()).length, icon: Sparkles, color: "text-blue-400" }
+            ].map((stat, i) => (
+              <div key={i} className="bg-card border border-border/50 p-5 rounded-2xl shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <div className={`p-2 rounded-xl bg-white/5 ${stat.color}`}>
+                    <stat.icon className="w-5 h-5" />
+                  </div>
+                </div>
+                <p className="text-2xl font-black text-foreground tracking-tight">{stat.value}</p>
+                <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest">{stat.label}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Registrations Table/Cards */}
+          <div className="bg-card border border-border/50 rounded-2xl overflow-hidden shadow-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-muted/50 border-b border-border/50">
+                    <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest">Student Name</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest">Class</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest">School</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest">Phone</th>
+                    <th className="px-6 py-4 text-[10px] font-black text-muted-foreground uppercase tracking-widest">Registration Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/30">
+                  {registrations.length > 0 ? (
+                    registrations.map((reg) => (
+                      <tr key={reg.id} className="hover:bg-muted/30 transition-colors">
+                        <td className="px-6 py-4">
+                          <div className="font-bold text-foreground text-sm">{reg.name}</div>
+                          <div className="text-[10px] text-muted-foreground font-mono">{reg.student_id.slice(0, 8)}...</div>
+                        </td>
+                        <td className="px-6 py-4 text-sm font-medium text-slate-300">{reg.class}</td>
+                        <td className="px-6 py-4 text-sm text-slate-400">{reg.school}</td>
+                        <td className="px-6 py-4 text-sm font-mono text-indigo-400">{reg.phone || "N/A"}</td>
+                        <td className="px-6 py-4 text-sm text-slate-400">
+                          {new Date(reg.registered_at).toLocaleDateString()}
+                          <span className="text-[10px] ml-2 opacity-50">{new Date(reg.registered_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground italic">
+                        No registrations found for this filter.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
       )}
     </div>

@@ -23,7 +23,7 @@ export async function GET(req: NextRequest) {
 
     // Admin / Finance contexts → platform-wide insights
     if (entityType === 'platform') {
-      const supabase = createClient();
+      const supabase = await createClient();
       const { data: platformInsights } = await supabase
         .from('intelligence_insights')
         .select('insight_text, insight_type, confidence, created_at')

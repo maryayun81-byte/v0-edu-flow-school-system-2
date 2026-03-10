@@ -38,8 +38,16 @@ interface Exam {
   status: "Draft" | "Active" | "Closed" | "Finalized";
   system_type: "CBC" | "8-4-4" | "Combined";
   applicable_classes: string[];
+  tuition_event_id?: string | null;
   created_at: string;
   updated_at: string;
+}
+
+interface TuitionEvent {
+  id: string;
+  name: string;
+  start_date: string;
+  active_status: boolean;
 }
 
 interface Class {
@@ -55,6 +63,7 @@ const YEARS = Array.from({ length: 10 }, (_, i) => CURRENT_YEAR - 2 + i);
 export default function AdminExamManager() {
   const [exams, setExams] = useState<Exam[]>([]);
   const [classes, setClasses] = useState<Class[]>([]);
+  const [tuitionEvents, setTuitionEvents] = useState<TuitionEvent[]>([]);
   const [loading, setLoading] = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingExam, setEditingExam] = useState<Exam | null>(null);
@@ -66,6 +75,7 @@ export default function AdminExamManager() {
   const [systemType, setSystemType] = useState<"CBC" | "8-4-4" | "Combined">("8-4-4");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [selectedTuitionEventId, setSelectedTuitionEventId] = useState("");
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
 
   useEffect(() => {
@@ -75,7 +85,7 @@ export default function AdminExamManager() {
 
   async function fetchData() {
     try {
-      const [examsRes, classesRes] = await Promise.all([
+      const [examsRes, classesRes, tuitionRes] = await Promise.all([
         supabase
           .from("exams")
           .select("*")
@@ -84,10 +94,21 @@ export default function AdminExamManager() {
           .from("classes")
           .select("id, name, form_level")
           .order("form_level", { ascending: true }),
+        supabase
+          .from("tuition_events")
+          .select("id, name, start_date, active_status")
+          .order("start_date", { ascending: false }),
       ]);
 
       if (examsRes.data) setExams(examsRes.data);
       if (classesRes.data) setClasses(classesRes.data);
+      if (tuitionRes.data) {
+        setTuitionEvents(tuitionRes.data);
+        // Default to active or most recent
+        const active = tuitionRes.data.find((t: TuitionEvent) => t.active_status);
+        if (active) setSelectedTuitionEventId(active.id);
+        else if (tuitionRes.data.length > 0) setSelectedTuitionEventId(tuitionRes.data[0].id);
+      }
     } catch (error) {
       console.error("Error fetching data:", error);
     } finally {
@@ -118,6 +139,7 @@ export default function AdminExamManager() {
     setTerm("");
     setStartDate("");
     setEndDate("");
+    setSelectedTuitionEventId(tuitionEvents.find((t: TuitionEvent) => t.active_status)?.id || (tuitionEvents[0]?.id || ""));
     setSelectedClasses([]);
     setSystemType("8-4-4");
     setEditingExam(null);
@@ -130,6 +152,7 @@ export default function AdminExamManager() {
     setTerm(exam.term);
     setStartDate(exam.start_date);
     setEndDate(exam.end_date);
+    setSelectedTuitionEventId(exam.tuition_event_id || "");
     setSelectedClasses(exam.applicable_classes);
     setSystemType(exam.system_type || "8-4-4");
     setShowCreateModal(true);
@@ -155,6 +178,7 @@ export default function AdminExamManager() {
         end_date: endDate,
         system_type: systemType,
         applicable_classes: selectedClasses,
+        tuition_event_id: selectedTuitionEventId || null,
       };
 
       if (editingExam) {
@@ -233,7 +257,32 @@ export default function AdminExamManager() {
         throw error;
       }
 
-      // 3. Log Audit (Non-blocking)
+      // 3. Send Notification to Teachers
+      try {
+        if (newStatus === "Closed") {
+          await supabase.from("notifications").insert({
+            title: "Exam Marking Required",
+            message: `The exam "${exam.exam_name}" is now closed. Please begin entering student marks.`,
+            type: "warning",
+            audience: "teacher",
+            target_role: "teacher", // Added for compatibility with legacy queries
+            created_by: (await supabase.auth.getUser()).data.user?.id
+          });
+        } else if (newStatus === "Finalized") {
+          await supabase.from("notifications").insert({
+            title: "Exam Finalized",
+            message: `The exam "${exam.exam_name}" has been finalized. Marking is now locked and results are being processed.`,
+            type: "success",
+            audience: "teacher",
+            target_role: "teacher",
+            created_by: (await supabase.auth.getUser()).data.user?.id
+          });
+        }
+      } catch (notifErr) {
+        console.error("Failed to send exam update notification:", notifErr);
+      }
+
+      // 4. Log Audit (Non-blocking)
       try {
         await supabase.rpc("log_exam_audit", {
             p_exam_id: examId,
@@ -429,6 +478,25 @@ export default function AdminExamManager() {
                     className="h-11 bg-muted border-border/50"
                   />
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Linked Tuition Event *</Label>
+                <div className="flex items-center gap-2">
+                    <Select value={selectedTuitionEventId} onValueChange={setSelectedTuitionEventId}>
+                        <SelectTrigger className="h-11 bg-muted border-border/50">
+                            <SelectValue placeholder="Select Tuition Event" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {tuitionEvents.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                    {t.name} {t.active_status && "(Active)"}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+                <p className="text-[10px] text-muted-foreground">Linking helps RCCIC correlate exam performance with specific tuition periods.</p>
               </div>
 
               <div className="space-y-2">

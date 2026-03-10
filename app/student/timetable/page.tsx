@@ -70,7 +70,10 @@ export default function StudentTimetablePage() {
   }, []);
 
   const filteredSessions = filterMode === 'my_subjects'
-    ? sessions.filter((s: TimetableSession) => studentSubjects.includes(s.subject))
+    ? sessions.filter((s: TimetableSession) => {
+        if (!studentSubjects || studentSubjects.length === 0 || !s.subject) return true;
+        return isMySubject(s.subject);
+      })
     : sessions;
 
   const getSessionsForDay = (day: string) => {
@@ -79,7 +82,10 @@ export default function StudentTimetablePage() {
       .sort((a, b) => a.start_time.localeCompare(b.start_time));
   };
 
-  const isMySubject = (subject: string) => studentSubjects.includes(subject);
+  const isMySubject = (subject: string) => {
+    if (!subject || !studentSubjects) return false;
+    return studentSubjects.some(s => s && s.toLowerCase().trim() === subject.toLowerCase().trim());
+  };
   const formatTime = (time: string) => time.substring(0, 5);
 
   if (loading || sessionsLoading) {
