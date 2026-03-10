@@ -2,7 +2,7 @@
 -- 1. audit_logs: allow users to view their own logs
 DROP POLICY IF EXISTS "Users can view their own audit logs" ON audit_logs;
 CREATE POLICY "Users can view their own audit logs" ON audit_logs
-    FOR SELECT USING (user_id = auth.uid());
+    FOR SELECT USING (created_by = auth.uid());
 
 -- 2. intelligence_insights: allow users to view insights related to them
 -- entity_id for students is their UUID

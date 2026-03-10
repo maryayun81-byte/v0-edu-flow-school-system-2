@@ -1,11 +1,5 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Uses service role for server-side aggregation
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
 export interface StudentPaymentRecord {
   student_id: string;
   student_name: string;
@@ -57,6 +51,11 @@ export interface FinancialReportData {
 }
 
 export async function aggregateEventFinancials(eventId: string): Promise<FinancialReportData> {
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
   // 1. Fetch tuition event
   const { data: event, error: eventError } = await supabase
     .from('tuition_events')

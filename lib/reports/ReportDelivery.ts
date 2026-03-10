@@ -2,15 +2,13 @@ import { Resend } from 'resend';
 import twilio from 'twilio';
 import type { FinancialReportData } from './FinancialDataAggregator';
 
-const resend = new Resend(process.env.RESEND_API_KEY);
-const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-
 export async function sendFinancialReportEmail(
   pdfBuffer: Buffer,
   csvString: string,
   report: FinancialReportData,
   recipientEmail: string
 ) {
+  const resend = new Resend(process.env.RESEND_API_KEY);
   const eventName = report.event.name;
   const date = new Date().toLocaleDateString('en-KE', { dateStyle: 'long' });
 
@@ -64,6 +62,7 @@ export async function sendFinancialReportWhatsApp(
   report: FinancialReportData,
   recipientPhone: string
 ) {
+  const twilioClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   const message = `🚀 *Peak Performance Financial Intelligence*
 
 Your tuition event financial report for *${report.event.name}* has been generated successfully.

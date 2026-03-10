@@ -50,12 +50,20 @@ export async function GET(
     }
     
     console.log(`[PDF Service] Generating PDF for ${transcript.profiles?.full_name} (${transcript.profiles?.admission_number})`);
+    console.log(`[PDF Service] Raw Transcript Data:`, {
+        id: transcript.id,
+        exam_id: transcript.exam_id,
+        status: transcript.status,
+        profile_id: transcript.student_id
+    });
 
     const { data: settings, error: settingsError } = await supabase.from("school_settings").select("*").single();
     if (settingsError) console.error("[PDF Service] Failed to fetch settings:", settingsError);
+    console.log(`[PDF Service] School Logo URL: ${settings?.logo_url}`);
 
     const { data: items, error: itemsError } = await supabase.from("transcript_items").select("*").eq("transcript_id", transcriptId).order("subject_name", { ascending: true });
     if (itemsError) console.error("[PDF Service] Failed to fetch transcript items:", itemsError);
+    console.log(`[PDF Service] Number of Transcript Items: ${items?.length || 0}`);
 
     // Theme Logic
     // Theme Logic
@@ -94,8 +102,15 @@ export async function GET(
     const fetchImage = async (url: string) => {
         if (!url) return null;
         try {
-            console.log(`[PDF Service] Fetching image from: ${url.substring(0, 50)}...`);
-            const res = await fetch(url);
+            // Handle relative URLs
+            let finalUrl = url;
+            if (url.startsWith('/')) {
+                const baseUrl = request.nextUrl.origin;
+                finalUrl = `${baseUrl}${url}`;
+            }
+            
+            console.log(`[PDF Service] Fetching image from: ${finalUrl.substring(0, 100)}...`);
+            const res = await fetch(finalUrl);
             if (!res.ok) throw new Error(`Fetch failed with status: ${res.status}`);
             const buffer = await res.arrayBuffer();
             return new Uint8Array(buffer);

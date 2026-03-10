@@ -250,7 +250,7 @@ export default function StudentTranscriptViewer({
     switch(theme) {
       case "Classic": return `${base} font-serif border-[3px] border-double border-black`;
       case "Elegant": return `${base} font-serif bg-[#FFFAF0] text-slate-900 border-[6px] border-double border-amber-300`;
-      case "Professional": return `${base} font-sans text-slate-800 border bg-[url('/bg-grid.png')]`; 
+      case "Professional": return `${base} font-sans text-slate-800 border bg-gradient-to-br from-slate-50 to-slate-100`; 
       case "Minimalist": return `${base} font-light text-neutral-600 tracking-wide`;
       case "Academic": return `${base} font-serif text-black border-[12px] border-double border-[#800000]/20`;
       case "Tech": return `${base} font-mono bg-slate-50 text-slate-900 border-l-8 border-slate-900`;

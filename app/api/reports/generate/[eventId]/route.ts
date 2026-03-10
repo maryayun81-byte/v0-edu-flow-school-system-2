@@ -4,16 +4,18 @@ import { aggregateEventFinancials } from '@/lib/reports/FinancialDataAggregator'
 import { generateFinancialReportPDF, generateCSV } from '@/lib/reports/ReportPDFGenerator';
 import { sendFinancialReportEmail, sendFinancialReportWhatsApp } from '@/lib/reports/ReportDelivery';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
 export async function POST(
   req: NextRequest,
-  { params }: { params: { eventId: string } }
+  props: { params: Promise<{ eventId: string }> }
 ) {
-  const { eventId } = params;
+  const { eventId } = await props.params;
+  
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
 
   try {
     // 1. Mark as generating (dedup check)
