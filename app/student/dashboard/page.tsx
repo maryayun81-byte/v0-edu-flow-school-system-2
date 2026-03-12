@@ -48,6 +48,7 @@ import { StudentDashboardSkeleton } from "@/components/DashboardSkeleton";
 import StudentTranscriptViewer from "@/components/StudentTranscriptViewer";
 import StudentResults from "@/components/StudentResults";
 import StudentAssignmentsManager from "@/components/StudentAssignmentsManager";
+import EnterpriseStudentAssignments from "@/components/EnterpriseStudentAssignments";
 import StudentNotesManager from "@/components/StudentNotesManager";
 import StudentCalendar from "@/components/StudentCalendar";
 import StudentUpcomingExams from "@/components/StudentUpcomingExams";
@@ -1281,10 +1282,8 @@ export default function StudentDashboard() {
 
         {/* Assignments Tab */}
         {activeTab === "assignments" && profile && (
-          <StudentAssignmentsManager 
+          <EnterpriseStudentAssignments
             studentId={profile.id}
-            studentClass={profile.form_class}
-            className="w-full"
           />
         )}
 

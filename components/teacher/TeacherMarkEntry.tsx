@@ -209,9 +209,9 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
 
     const { data } = await supabase
       .from("profiles")
-      .select("id, full_name, admission_number, curriculum_type")
-      .eq("form_class", className)
+      .select("id, full_name, admission_number, curriculum_type, form_class")
       .eq("role", "student")
+      .ilike("form_class", `%${className}%`) // Case-insensitive partial match
       .order("full_name", { ascending: true });
 
     if (data) {
@@ -223,9 +223,9 @@ export default function TeacherMarkEntry({ teacherId, onClose }: TeacherMarkEntr
            return studentSystem === selectedExam.system_type;
        });
       setStudents(filteredStudents);
-      // Initialize marks map
+      // Initialize marks map (use filtered students only)
       const initialMarks = new Map<string, MarkEntry>();
-      data.forEach((student: any) => {
+      filteredStudents.forEach((student: any) => {
         initialMarks.set(student.id, {
           student_id: student.id,
           score: 0,

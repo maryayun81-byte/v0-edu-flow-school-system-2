@@ -58,6 +58,8 @@ import AdminAIGovernance from "@/components/admin/AdminAIGovernance";
 import AdminResultsPanel from "@/components/admin/AdminResultsPanel";
 import { ActiveEventBanner } from "@/components/ActiveEventBanner";
 import { CognitiveCore, ClassificationZone } from "@/lib/ai/CognitiveCore";
+import TeachersTab from "@/components/admin/TeachersTab";
+import StudentsTab from "@/components/admin/StudentsTab";
 
 const supabase = createClient();
 
@@ -795,61 +797,8 @@ export default function AdminDashboard() {
 
         {/* Teachers Tab */}
         {activeTab === "teachers" && (
-          <div className="bg-card border border-border/50 rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-border/50 flex items-center justify-between">
-              <h3 className="font-semibold text-foreground">Teachers ({filteredTeachers.length})</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Subject</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Joined</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {filteredTeachers.map(teacher => (
-                    <tr key={teacher.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3">
-                        <div>
-                          <p className="font-medium text-foreground">{teacher.full_name || "Unnamed"}</p>
-                          <p className="text-xs text-muted-foreground">{teacher.email}</p>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{teacher.subject || "Not set"}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">
-                        {new Date(teacher.created_at).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              setSelectedTeacher(teacher.id);
-                              setShowAssignModal(true);
-                            }}
-                          >
-                            <UserPlus className="w-4 h-4 mr-1" />
-                            Assign
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="text-destructive hover:bg-destructive/10"
-                            onClick={() => handleDeleteUser(teacher.id, 'teacher')}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="animate-in fade-in duration-500">
+            <TeachersTab />
           </div>
         )}
 
@@ -891,70 +840,8 @@ export default function AdminDashboard() {
 
         {/* Students Tab */}
         {activeTab === "students" && (
-          <div className="bg-card border border-border/50 rounded-xl overflow-hidden">
-            <div className="p-4 border-b border-border/50">
-              <h3 className="font-semibold text-foreground">Students ({filteredStudents.length})</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-muted/50">
-                  <tr>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Name</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Admission No.</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Class</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Curriculum</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">School</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Subjects</th>
-                    <th className="px-4 py-3 text-left text-sm font-medium text-muted-foreground">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/50">
-                  {filteredStudents.map(student => (
-                    <tr key={student.id} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-4 py-3 font-medium text-foreground">{student.full_name}</td>
-                      <td className="px-4 py-3 text-sm font-mono text-chart-3">{student.admission_number}</td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{student.form_class}</td>
-                      <td className="px-4 py-3">
-                         <span 
-                            onClick={() => handleUpdateCurriculum(student.id, student.curriculum_type || '8-4-4')}
-                            className={`
-                              cursor-pointer px-2 py-1 rounded text-xs font-bold border transition-colors
-                              ${student.curriculum_type === 'CBC' ? 'bg-green-50 text-green-700 border-green-200 hover:bg-green-100' : 'bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100'}
-                            `}
-                         >
-                            {student.curriculum_type || '8-4-4'}
-                         </span>
-                      </td>
-                      <td className="px-4 py-3 text-sm text-muted-foreground">{student.school_name}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex flex-wrap gap-1">
-                          {(student.subjects || []).slice(0, 3).map(subject => (
-                            <span key={subject} className="px-2 py-0.5 bg-primary/10 text-primary text-xs rounded">
-                              {subject}
-                            </span>
-                          ))}
-                          {(student.subjects || []).length > 3 && (
-                            <span className="px-2 py-0.5 bg-muted text-muted-foreground text-xs rounded">
-                              +{student.subjects.length - 3}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive hover:bg-destructive/10"
-                          onClick={() => handleDeleteUser(student.id, 'student')}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <div className="animate-in fade-in duration-500">
+            <StudentsTab />
           </div>
         )}
 

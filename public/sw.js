@@ -55,32 +55,27 @@ self.addEventListener('fetch', (event) => {
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      // Return cached response if found
+      // Return cached response if found (Stale-While-Revalidate)
       if (cachedResponse) {
-        // Update cache in background (stale-while-revalidate)
-        // .catch() prevents unhandled promise rejection when offline
         fetch(event.request).then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
             caches.open(CACHE_NAME).then((cache) => {
               cache.put(event.request, networkResponse.clone());
             });
           }
-        }).catch(() => { /* offline - ignore background update failure */ });
+        }).catch(() => {});
         return cachedResponse;
       }
 
       // Fetch from network
       return fetch(event.request)
         .then((networkResponse) => {
-          // Don't cache if not a valid response
           if (!networkResponse || networkResponse.status !== 200 || networkResponse.type === 'error') {
             return networkResponse;
           }
 
-          // Cache the new response
           const responseToCache = networkResponse.clone();
           caches.open(CACHE_NAME).then((cache) => {
-            // Only cache same-origin requests
             if (event.request.url.startsWith(self.location.origin)) {
               cache.put(event.request, responseToCache);
             }
@@ -89,18 +84,11 @@ self.addEventListener('fetch', (event) => {
           return networkResponse;
         })
         .catch(() => {
-          // If both cache and network fail, show offline page for navigation requests
+          // If network fails and it's a navigation request, show offline page
           if (event.request.mode === 'navigate') {
-            return caches.match(OFFLINE_URL);
+            return caches.match(OFFLINE_URL) || caches.match('/');
           }
-          // For other requests, return a basic offline response
-          return new Response('Offline', {
-            status: 503,
-            statusText: 'Service Unavailable',
-            headers: new Headers({
-              'Content-Type': 'text/plain',
-            }),
-          });
+          return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
         });
     })
   );

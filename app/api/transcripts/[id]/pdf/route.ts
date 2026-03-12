@@ -434,7 +434,8 @@ export async function GET(
     doc.setFillColor(primary);
     doc.rect(pageWidth - margin - 15, pageHeight - margin - 15, 10, 10, "F");
     
-    return new NextResponse(doc.output("arraybuffer"), {
+    const pdfBuffer = Buffer.from(doc.output("arraybuffer"));
+    return new NextResponse(pdfBuffer, {
       status: 200,
       headers: { "Content-Type": "application/pdf", "Content-Disposition": `attachment; filename="Transcript.pdf"` },
     });

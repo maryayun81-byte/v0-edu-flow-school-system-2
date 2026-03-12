@@ -56,7 +56,7 @@ export async function generateQuizPDFReport(attemptId: string): Promise<void> {
       )
     `)
     .eq('id', attemptId)
-    .single()
+    .single() as { data: any }
 
   if (!attempt) {
     throw new Error('Quiz attempt not found')

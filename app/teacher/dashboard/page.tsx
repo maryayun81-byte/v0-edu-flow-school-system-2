@@ -43,9 +43,9 @@ import {
 } from "@/components/ui/tabs";
 import { FloatingActionMenu } from '@/components/FloatingActionMenu';
 import AssignmentWizard from '@/components/AssignmentWizard';
+import TeacherAssignmentDashboard from '@/components/TeacherAssignmentDashboard';
 import { TeacherDashboardSkeleton } from '@/components/TeacherDashboardSkeleton';
 import { PwaInstallButton } from '@/components/PwaInstallButton';
-import ClassAssignmentsManager from '@/components/ClassAssignmentsManager';
 import { DashboardTabNavigation } from '@/components/DashboardTabNavigation';
 import NotesManager from '@/components/NotesManager';
 import TimetableManager from '@/components/TimetableManager';
@@ -479,7 +479,7 @@ export default function TeacherDashboard() {
       case 'assignments':
         return (
           <div className="space-y-6 animate-[fadeIn_0.3s_ease-out]">
-             {user && <ClassAssignmentsManager userId={user.id} />}
+            {user && <TeacherAssignmentDashboard userId={user.id} />}
           </div>
         );
 

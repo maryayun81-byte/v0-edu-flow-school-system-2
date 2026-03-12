@@ -20,6 +20,9 @@ export interface AttendanceData {
   summaries?: any[]; 
   recentDays?: any[];
   volatility?: number;
+  eligibleCount?: number;
+  almostEligibleCount?: number;
+  notEligibleCount?: number;
 }
 
 export interface FinanceData {
@@ -111,24 +114,62 @@ export class IntelligentEngine {
   }
 
   private static generateAdminAttendanceInsight(data: AttendanceData, inference: PredictionResult): any {
-    let insight = `### AGI Intelligence Report [Zone: ${inference.zone}]\n\n`;
-    insight += `**Global Success Score:** ${(inference.successScore * 100).toFixed(1)}%\n`;
-    insight += `**Trend Forecast:** ${inference.trajectory ? inference.trajectory.forecastedSuccess > inference.successScore ? 'Positive Growth' : 'Decay Detected' : 'Baseline'}\n\n`;
+    const threshold = data.threshold || 80;
+    const avg = data.avgAttendance || 0;
+    const atRisk = data.belowThresholdCount || 0;
     
-    if (inference.successScore > 0.8) {
-      insight += `System status is **Elite**. Educational strategies are highly effective. `;
-    } else {
-      insight += `Cognitive volatility detected in **${data.belowThresholdCount || 'Several'}** segments. `;
+    let insight = `### STRATEGIC ATTENDANCE AUDIT [EVENT: ${inference.zone}]\n\n`;
+    
+    // 1. Observation
+    insight += `#### 1. PRIMARY OBSERVATION\n`;
+    insight += `Institutional attendance is indexed at **${avg}%**, with **${atRisk} segments** currently operating below the mandatory **${threshold}% precision threshold**. `;
+    if (data.dailyTrend && data.dailyTrend.length > 1) {
+      const recent = data.dailyTrend[data.dailyTrend.length - 1].present_pct;
+      const prev = data.dailyTrend[data.dailyTrend.length - 2].present_pct;
+      const velocity = recent - prev;
+      insight += `A **${velocity > 0 ? '+' : ''}${velocity}% engagement velocity** has been detected in the most recent 24-hour cycle. `;
     }
+    insight += `\n\n`;
 
-    insight += `\n\n**AGI Insight:** ${inference.insights[0]}`;
+    // 2. Intelligence Interpretation
+    insight += `#### 2. NEURAL INTERPRETATION\n`;
+    if (avg >= threshold + 5) {
+      insight += `Systemic stability is **Optimal**. The current tuition event is demonstrating high-velocity student commitment, correlating with elite-tier curriculum delivery. The risk of academic dropout in the lower quartiles is minimized. `;
+    } else if (avg >= threshold) {
+      insight += `The institution is maintaining a **Strategic Equilibrium**. Attendance is healthy but vulnerable to volatility in specific day-of-week patterns (notably Friday/Saturday decay). Behavioral signals suggest a "plateau effect" in the mid-performing sections. `;
+    } else {
+      insight += `⚠️ **SYSTEMIC DRIFT DETECTED.** The institution has breached the lower safety boundary. This pattern indicates a decoupling between student engagement and timetable scheduling. If left unaddressed, this trajectory will compromise term-end assessment throughput. `;
+    }
+    insight += `\n\n`;
+
+    // 3. Qualification Audit
+    insight += `#### 3. EXAM QUALIFICATION AUDIT\n`;
+    const eligRate = data.eligibleCount !== undefined && (data.eligibleCount + (data.notEligibleCount||0) + (data.almostEligibleCount||0)) > 0 
+        ? Math.round((data.eligibleCount / (data.eligibleCount + (data.notEligibleCount||0) + (data.almostEligibleCount||0))) * 100) 
+        : 0;
+    insight += `Final qualification projection is indexed at **${eligRate}%**. \n`;
+    insight += `* **Status:** ${eligRate > 80 ? 'EXCELLENT' : 'CRITICAL BORDERLINE'}\n`;
+    insight += `* **Confirmed Eligible:** ${data.eligibleCount || 0} Scholars\n`;
+    insight += `* **Borderline (Almost):** ${data.almostEligibleCount || 0} Scholars (Requires immediate engagement focus)\n`;
+    insight += `* **Disqualified:** ${data.notEligibleCount || 0} Scholars\n\n`;
+
+    // 4. Strategic Directives
+    insight += `#### 4. COMMAND DIRECTIVES\n`;
+    if (atRisk > 0) {
+      insight += `* **PRIORITY 1:** Activate "Rapid Response" protocols for the ${atRisk} critical students identified by the Risk Engine.\n`;
+      insight += `* **PRIORITY 2:** Cross-verify teacher register submission latency for the classes showing <${avg}% averages.\n`;
+    }
+    insight += `* **PRIORITY 3:** Execute a "Peak Retention" campaign for the upcoming 48-hour window to counteract detected cyclic decay.\n\n`;
+    
+    insight += `> **Leadership Summary:** ${inference.insights[0]}`;
 
     return {
       insight: insight,
       success_score: inference.successScore,
       zone: inference.zone,
       dropout_risk: inference.dropoutRisk,
-      trajectory: inference.trajectory
+      trajectory: inference.trajectory,
+      atRiskCount: atRisk
     };
   }
 

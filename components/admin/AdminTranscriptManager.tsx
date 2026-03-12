@@ -680,18 +680,20 @@ export default function AdminTranscriptManager() {
                 </Button>
              </div>
              
-             {/* Printable Area */}
-            <div 
-                className="mx-auto min-h-[900px] relative p-12 transition-all duration-300 print:min-h-screen shadow-2xl" 
-                style={{ 
-                    maxWidth: "210mm",
-                    backgroundColor: activeTheme?.colors?.background || '#ffffff',
-                    color: activeTheme?.colors?.text || '#000000',
-                    fontFamily: activeTheme?.fonts?.body || 'inherit',
-                    // Border logic
-                    border: activeTheme?.layout?.show_border ? `2px solid ${activeTheme?.colors?.primary}` : 'none'
-                }}
-            >
+             {/* Printable Area Container (Scrollable on Mobile) */}
+             <div className="w-full overflow-x-auto pb-4">
+               <div 
+                   className="mx-auto min-h-[900px] relative p-12 transition-all duration-300 print:min-h-screen shadow-2xl" 
+                   style={{ 
+                       width: "210mm",
+                       minWidth: "210mm",
+                       backgroundColor: activeTheme?.colors?.background || '#ffffff',
+                       color: activeTheme?.colors?.text || '#000000',
+                       fontFamily: activeTheme?.fonts?.body || 'inherit',
+                       // Border logic
+                       border: activeTheme?.layout?.show_border ? `2px solid ${activeTheme?.colors?.primary}` : 'none'
+                   }}
+               >
                
                {/* WATERMARK */}
               {settings?.logo_url && (
@@ -859,7 +861,7 @@ export default function AdminTranscriptManager() {
                      </div>
                   </div>
               </div>
-
+            </div>
             </div>
 
              {/* Actions */}

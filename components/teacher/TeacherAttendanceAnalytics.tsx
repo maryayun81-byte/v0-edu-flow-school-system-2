@@ -24,6 +24,8 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
   const [classInfo, setClassInfo] = useState<any>(null);
   const [events, setEvents] = useState<any[]>([]);
   const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [weeks, setWeeks] = useState<{ weekNumber: number; label: string; startDate: string; endDate: string }[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState<string>("all");
   
   const [stats, setStats] = useState({
     totalStudents: 0,
@@ -46,9 +48,62 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
 
   useEffect(() => {
     if (selectedEventId && classInfo) {
+      // When event changes, first extract weeks available for this event before fetching analytics
+      extractWeeks();
       fetchAnalyticsData();
     }
-  }, [selectedEventId, classInfo]);
+  }, [selectedEventId, classInfo, selectedWeek]);
+
+  async function extractWeeks() {
+    if (!selectedEventId || !classInfo) return;
+    const { data } = await supabase
+      .from("attendance")
+      .select("attendance_date")
+      .eq("event_id", selectedEventId)
+      .eq("class_id", classInfo.id)
+      .order("attendance_date", { ascending: true });
+
+    if (data && data.length > 0) {
+      const dates = data.map((d: any) => d.attendance_date);
+      const uniqueDates = Array.from(new Set(dates)).sort();
+      
+      const generatedWeeks: { weekNumber: number; label: string; startDate: string; endDate: string }[] = [];
+      let weekCounter = 1;
+      
+      // Group dates by ISO week (7 day blocks relative to the first recorded attendance date)
+      if (uniqueDates.length > 0) {
+        const firstDate = new Date(uniqueDates[0] as string);
+        uniqueDates.forEach((dateStr) => {
+          const d = new Date(dateStr as string);
+          const diffTime = Math.abs(d.getTime() - firstDate.getTime());
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          const wNum = Math.floor(diffDays / 7) + 1;
+          
+          let existingWeek = generatedWeeks.find(w => w.weekNumber === wNum);
+          if (!existingWeek) {
+            generatedWeeks.push({
+              weekNumber: wNum,
+              label: `Week ${wNum}`,
+              startDate: dateStr as string,
+              endDate: dateStr as string // Will update later
+            });
+          } else {
+            existingWeek.endDate = dateStr as string;
+          }
+        });
+        
+        // Finalize labels
+        generatedWeeks.forEach(w => {
+           const startStr = new Date(w.startDate).toLocaleDateString("en-KE", { month: "short", day: "numeric" });
+           const endStr = new Date(w.endDate).toLocaleDateString("en-KE", { month: "short", day: "numeric" });
+           w.label = `Week ${w.weekNumber}: ${startStr} - ${endStr}`;
+        });
+      }
+      setWeeks(generatedWeeks);
+    } else {
+      setWeeks([]);
+    }
+  }
 
   async function fetchInitialData() {
     setLoading(true);
@@ -140,8 +195,8 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
   async function fetchAnalyticsData() {
     if (!selectedEventId || !classInfo) return;
 
-    // 1. Fetch eligibility/summary data for the class in this event
-    const { data: eligibilityData } = await supabase
+    // Build the query blocks
+    let eligibilityQuery = supabase
       .from("exam_eligibility")
       .select(`
         student_id, 
@@ -156,12 +211,67 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
       .eq("event_id", selectedEventId)
       .eq("class_id", classInfo.id);
 
-    if (eligibilityData) {
+    // Fetch the raw attendance records to manually calculate weekly stats if a week is selected
+    let attendanceQuery = supabase
+      .from("attendance")
+      .select("student_id, attendance_date, status, profiles!student_id(full_name)")
+      .eq("event_id", selectedEventId)
+      .eq("class_id", classInfo.id)
+      .order("attendance_date");
+
+    if (selectedWeek !== "all") {
+       const week = weeks.find(w => w.weekNumber.toString() === selectedWeek);
+       if (week) {
+         attendanceQuery = attendanceQuery.gte("attendance_date", week.startDate).lte("attendance_date", week.endDate);
+       }
+    }
+
+    const [eligibilityDataRaw, attendanceDataRaw] = await Promise.all([
+      eligibilityQuery,
+      attendanceQuery
+    ]);
+
+    const eligibilityData = eligibilityDataRaw.data;
+    const attendanceData = attendanceDataRaw.data;
+
+    if (eligibilityData && attendanceData) {
+      let activeEligibilityData = eligibilityData;
+
+      // If a week is selected, recalculate stats based ONLY on that week's raw attendance
+      if (selectedWeek !== "all") {
+         const studentMap = new Map();
+         attendanceData.forEach((record: any) => {
+            if (!studentMap.has(record.student_id)) {
+              studentMap.set(record.student_id, {
+                student_id: record.student_id,
+                days_present: 0,
+                days_late: 0,
+                days_absent: 0,
+                days_excused: 0,
+                profiles: record.profiles
+              });
+            }
+            const s = studentMap.get(record.student_id);
+            if (record.status === "present") s.days_present++;
+            if (record.status === "late") s.days_late++;
+            if (record.status === "absent") s.days_absent++;
+            if (record.status === "excused") s.days_excused++;
+         });
+         
+         // Compute percentages for the week
+         for (const [id, s] of studentMap.entries()) {
+            const totalRecorded = s.days_present + s.days_late + s.days_absent + s.days_excused; // Can include excused or not, usually we derive % from valid days
+            const validDays = s.days_present + s.days_late + s.days_absent;
+            s.attendance_percentage = validDays > 0 ? ((s.days_present + s.days_late) / validDays) * 100 : 0;
+         }
+         activeEligibilityData = Array.from(studentMap.values());
+      }
+
       // Process stats
-      const total = eligibilityData.length;
-      const avg = eligibilityData.reduce((acc: number, curr: any) => acc + Number(curr.attendance_percentage), 0) / (total || 1);
-      const atRisk = eligibilityData.filter((s: any) => Number(s.attendance_percentage) < 80).length;
-      const perfect = eligibilityData.filter((s: any) => Number(s.attendance_percentage) === 100).length;
+      const total = activeEligibilityData.length;
+      const avg = activeEligibilityData.reduce((acc: number, curr: any) => acc + Number(curr.attendance_percentage), 0) / (total || 1);
+      const atRisk = activeEligibilityData.filter((s: any) => Number(s.attendance_percentage) < 80).length;
+      const perfect = activeEligibilityData.filter((s: any) => Number(s.attendance_percentage) === 100).length;
 
       setStats({
         totalStudents: total,
@@ -171,35 +281,28 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
       });
 
       // Process student performance (Bar Chart)
-      setStudentPerformance(eligibilityData.map((s: any) => ({
+      setStudentPerformance(activeEligibilityData.map((s: any) => ({
         name: (s.profiles as any).full_name.split(" ")[0],
         percentage: Number(s.attendance_percentage)
       })).sort((a: any, b: any) => b.percentage - a.percentage).slice(0, 10));
 
       // At Risk List
-      setAtRiskStudents(eligibilityData
+      setAtRiskStudents(activeEligibilityData
         .filter((s: any) => Number(s.attendance_percentage) < 80)
         .sort((a: any, b: any) => Number(a.attendance_percentage) - Number(b.attendance_percentage))
       );
 
       // Status Distribution (Pie Chart)
       const dist = [
-        { name: "Present", value: eligibilityData.reduce((acc: number, curr: any) => acc + curr.days_present, 0) },
-        { name: "Late", value: eligibilityData.reduce((acc: number, curr: any) => acc + curr.days_late, 0) },
-        { name: "Absent", value: eligibilityData.reduce((acc: number, curr: any) => acc + curr.days_absent, 0) },
-        { name: "Excused", value: eligibilityData.reduce((acc: number, curr: any) => acc + curr.days_excused, 0) }
+        { name: "Present", value: activeEligibilityData.reduce((acc: number, curr: any) => acc + curr.days_present, 0) },
+        { name: "Late", value: activeEligibilityData.reduce((acc: number, curr: any) => acc + curr.days_late, 0) },
+        { name: "Absent", value: activeEligibilityData.reduce((acc: number, curr: any) => acc + curr.days_absent, 0) },
+        { name: "Excused", value: activeEligibilityData.reduce((acc: number, curr: any) => acc + curr.days_excused, 0) }
       ];
       setDistribution(dist);
     }
 
-    // 2. Fetch daily trend (Line Chart)
-    const { data: attendanceData } = await supabase
-      .from("attendance")
-      .select("attendance_date, status")
-      .eq("event_id", selectedEventId)
-      .eq("class_id", classInfo.id)
-      .order("attendance_date");
-
+    // 2. Fetch daily trend (Line Chart) based on the filtered attendanceData
     if (attendanceData) {
       const trendMap = new Map();
       attendanceData.forEach((r: any) => {
@@ -248,14 +351,26 @@ export default function TeacherAttendanceAnalytics({ teacherId }: TeacherAnalyti
           <h2 className="text-xl font-bold text-foreground">Class Attendance Analytics</h2>
           <p className="text-sm text-muted-foreground">Class: <span className="font-semibold text-primary">{classInfo.name}</span></p>
         </div>
-        <div className="w-full md:w-64">
+        <div className="w-full md:w-auto flex flex-col md:flex-row gap-2">
            <Select value={selectedEventId} onValueChange={setSelectedEventId}>
-            <SelectTrigger className="bg-muted border-border/50">
+            <SelectTrigger className="bg-muted border-border/50 md:w-48">
               <SelectValue placeholder="Select event..." />
             </SelectTrigger>
             <SelectContent>
               {events.map(e => (
                 <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          
+          <Select value={selectedWeek} onValueChange={setSelectedWeek} disabled={weeks.length === 0}>
+            <SelectTrigger className="bg-muted border-border/50 md:w-56">
+              <SelectValue placeholder="Filter by Week..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Weeks</SelectItem>
+              {weeks.map(w => (
+                <SelectItem key={w.weekNumber} value={w.weekNumber.toString()}>{w.label}</SelectItem>
               ))}
             </SelectContent>
           </Select>

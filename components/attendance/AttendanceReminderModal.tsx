@@ -44,7 +44,7 @@ export default function AttendanceReminderModal({ teacherId, onMarkRegister, reg
       setClassInfo((ctData as any).classes);
 
       // 2. Find active event
-      const today = new Date().toISOString().split("T")[0];
+      const today = new Date().toLocaleDateString('en-CA');
       const { data: eventData } = await supabase
         .from("tuition_events")
         .select("id, name, start_date, end_date")
@@ -70,7 +70,7 @@ export default function AttendanceReminderModal({ teacherId, onMarkRegister, reg
   }
 
   const checkAttendanceStatus = useCallback(async (eventId: string, classId: string) => {
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString('en-CA');
     const { data } = await supabase
       .from("attendance")
       .select("id")
@@ -101,7 +101,7 @@ export default function AttendanceReminderModal({ teacherId, onMarkRegister, reg
 
   function handleCancel() {
     setIsOpen(false);
-    const today = new Date().toISOString().split("T")[0];
+    const today = new Date().toLocaleDateString('en-CA');
     localStorage.setItem(`attendance_dismiss_${today}`, Date.now().toString());
     
     // Set up local interval to re-check in 1 hour if user stays on page

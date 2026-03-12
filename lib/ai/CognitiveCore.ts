@@ -432,6 +432,27 @@ export class CognitiveCore {
     return "Moderate correlation: Behavioral habits are consistent with current academic trajectory.";
   }
 
+  public static async getEligibilitySignals(eventId: string) {
+    const { data: eligibility } = await this.supabase
+      .from("exam_eligibility")
+      .select("student_id, attendance_percentage, is_eligible")
+      .eq("event_id", eventId);
+
+    if (!eligibility || eligibility.length === 0) return null;
+
+    const total = eligibility.length;
+    const eligible = eligibility.filter((r: any) => r.is_eligible).length;
+    const borderline = eligibility.filter((r: any) => !r.is_eligible && Number(r.attendance_percentage) >= 70).length;
+    const highRiskCount = eligibility.filter((r: any) => Number(r.attendance_percentage) < 70).length;
+
+    return {
+      qualificationRate: (eligible / total) * 100,
+      borderlineScholars: borderline,
+      highRiskDisqualification: highRiskCount,
+      institutionalStandings: eligible > total * 0.8 ? "EXCELLENT" : "CRITICAL"
+    };
+  }
+
   /**
    * Fetches the full behavioral intelligence profile.
    */
@@ -711,9 +732,9 @@ export class CognitiveCore {
 
       // Engagement Velocity based on session frequency
       const { data: sessions } = await this.supabase
-        .from('audit_logs') // Assuming audit_logs tracks logins/actions
+        .from('platform_events') // Correct table for engagement signals
         .select('created_at')
-        .eq('created_by', studentId)
+        .eq('student_id', studentId)
         .gt('created_at', cutoff28);
       
       const sessionCount = sessions?.length || 0;

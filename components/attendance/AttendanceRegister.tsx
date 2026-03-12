@@ -74,6 +74,8 @@ export default function AttendanceRegister({ teacherId }: { teacherId: string })
   const [selectedEventId, setSelectedEventId] = useState("");
   const [calendarDates, setCalendarDates] = useState<CalendarDate[]>([]);
   const [selectedDate, setSelectedDate] = useState("");
+  const [weeks, setWeeks] = useState<{ weekNumber: number; label: string; dates: CalendarDate[] }[]>([]);
+  const [selectedWeek, setSelectedWeek] = useState<string>("all");
 
   const [students, setStudents] = useState<Student[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
@@ -117,7 +119,7 @@ export default function AttendanceRegister({ teacherId }: { teacherId: string })
     if (data && data.length > 0) {
       setEvents(data);
       // Auto-select the most relevant event (Active or closest to today)
-      const today = new Date().toISOString().split("T")[0];
+      const today = new Date().toLocaleDateString('en-CA');
       const activeEvent = data.find((e: any) => e.status === "active") || 
                         data.find((e: any) => today >= e.start_date && today <= e.end_date) || 
                         data[0];
@@ -169,18 +171,35 @@ export default function AttendanceRegister({ teacherId }: { teacherId: string })
     
     if (data) {
       setCalendarDates(data);
+      
+      // Calculate weeks (grouping by 7 days based on day_number)
+      const generatedWeeks: { weekNumber: number; label: string; dates: CalendarDate[] }[] = [];
+      data.forEach((d: any) => {
+        const wNum = Math.floor((d.day_number - 1) / 7) + 1;
+        let existingWeek = generatedWeeks.find(w => w.weekNumber === wNum);
+        if (!existingWeek) {
+          existingWeek = { weekNumber: wNum, label: `Week ${wNum}`, dates: [] };
+          generatedWeeks.push(existingWeek);
+        }
+        existingWeek.dates.push(d);
+      });
+      setWeeks(generatedWeeks);
+
       // Auto-select today if it's in the calendar
-      const todayStr = new Date().toISOString().split("T")[0];
+      const todayStr = new Date().toLocaleDateString('en-CA');
       const todayEntry = data.find((d: any) => d.calendar_date === todayStr);
       if (todayEntry) {
         setSelectedDate(todayEntry.calendar_date);
-      } else if (data.length > 0) {
-        // Fallback to the latest past date or first date? 
-        // User said "system should track the month and the date"
-        // If today is not in calendar (holiday/weekend), maybe don't auto-select.
+        const wNum = Math.floor((todayEntry.day_number - 1) / 7) + 1;
+        setSelectedWeek(wNum.toString());
       }
     }
   }
+
+  // Filter dates based on selected week
+  const filteredDates = selectedWeek === "all" 
+    ? calendarDates 
+    : calendarDates.filter(d => Math.floor((d.day_number - 1) / 7) + 1 === parseInt(selectedWeek));
 
   useEffect(() => {
     if (selectedEventId && selectedDate && classInfo) {
@@ -371,6 +390,23 @@ export default function AttendanceRegister({ teacherId }: { teacherId: string })
             </Select>
           </div>
 
+          {weeks.length > 0 && (
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Filter by Week</label>
+              <Select value={selectedWeek} onValueChange={setSelectedWeek}>
+                <SelectTrigger className="bg-muted border-border/50 h-11">
+                  <SelectValue placeholder="All Weeks" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Weeks</SelectItem>
+                  {weeks.map(w => (
+                    <SelectItem key={w.weekNumber} value={w.weekNumber.toString()}>{w.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Attendance Date</label>
             <Select
@@ -382,7 +418,7 @@ export default function AttendanceRegister({ teacherId }: { teacherId: string })
                 <SelectValue placeholder={selectedEventId ? "Select a valid date..." : "Select event first"} />
               </SelectTrigger>
               <SelectContent>
-                {calendarDates.map(d => (
+                {filteredDates.map(d => (
                   <SelectItem key={d.calendar_date} value={d.calendar_date}>
                     Day {d.day_number} — {new Date(d.calendar_date + "T00:00:00").toLocaleDateString("en-KE", {
                       weekday: "short", day: "numeric", month: "long"

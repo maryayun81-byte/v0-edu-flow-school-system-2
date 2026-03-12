@@ -35,13 +35,13 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
     // Detection
     const ua = navigator.userAgent;
     const ios = /iPad|iPhone|iPod/.test(ua) && !(window as any).MSStream;
-    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(ua);
+    const mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobi|Tablet/i.test(ua);
     
     setIsIOS(ios);
     setIsMobile(mobile);
 
-    // On mobile, we force "installable" visibility because native prompts are flaky
-    if (mobile) {
+    // On mobile, we force visibility because native prompts are flaky or non-existent (Safari)
+    if (mobile || ios) {
       setIsInstallable(true);
       setTimeout(() => setShowBanner(true), 3000);
     }
@@ -91,7 +91,11 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
     }
   };
 
-  if (isInstalled || !isInstallable) return null;
+  // If already installed, hide everything
+  if (isInstalled) return null;
+  
+  // For the auto-banner, only show if we detected it's installable
+  if (variant === 'banner' && !isInstallable) return null;
 
   // iOS step-by-step modal
   const IOSModal = showIOSModal ? (
@@ -100,7 +104,7 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-primary" />
-            <h3 className="font-bold text-foreground">Install on iPhone / iPad</h3>
+            <h3 className="font-bold text-foreground">Install on iOS</h3>
           </div>
           <button onClick={() => setShowIOSModal(false)} className="text-muted-foreground hover:text-foreground">
             <X className="w-5 h-5" />
@@ -108,9 +112,9 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
         </div>
         <ol className="space-y-3 text-sm text-muted-foreground">
           {[
-            <>Tap the <strong className="text-foreground">Share</strong> button (⬆) in Safari's toolbar</>,
-            <>Scroll down and tap <strong className="text-foreground">"Add to Home Screen"</strong></>,
-            <>Tap <strong className="text-foreground">"Add"</strong> in the top-right corner</>,
+            <>Tap the <strong className="text-foreground text-xs uppercase bg-primary/10 px-1 rounded">Share</strong> button (⬆) in Safari</>,
+            <>Scroll down and tap <strong className="text-foreground text-xs uppercase bg-primary/10 px-1 rounded">"Add to Home Screen"</strong></>,
+            <>Tap <strong className="text-foreground text-xs uppercase bg-primary px-1 rounded text-white">"Add"</strong> in the top-right</>,
           ].map((step, i) => (
             <li key={i} className="flex items-start gap-3">
               <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0 font-bold">{i + 1}</span>
@@ -132,26 +136,45 @@ export function PwaInstallButton({ variant = 'button' }: PwaInstallButtonProps) 
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2">
             <Smartphone className="w-5 h-5 text-primary" />
-            <h3 className="font-bold text-foreground">Install App</h3>
+            <h3 className="font-bold text-foreground text-sm uppercase tracking-wide">Manual Installation</h3>
           </div>
           <button onClick={() => setShowAndroidModal(false)} className="text-muted-foreground hover:text-foreground">
             <X className="w-5 h-5" />
           </button>
         </div>
-        <ol className="space-y-3 text-sm text-muted-foreground">
-          {[
-            <>Tap the <strong className="text-foreground">Menu</strong> icon (3 dots or lines) in your browser</>,
-            <>Look for <strong className="text-foreground">"Install app"</strong> or <strong className="text-foreground">"Add to Home screen"</strong></>,
-            <>Follow the on-screen prompts to confirm</>,
-          ].map((step, i) => (
-            <li key={i} className="flex items-start gap-3">
-              <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs flex items-center justify-center shrink-0 font-bold">{i + 1}</span>
-              <span>{step}</span>
-            </li>
-          ))}
-        </ol>
-        <button onClick={() => setShowAndroidModal(false)} className="w-full mt-5 py-2.5 bg-primary text-primary-foreground font-semibold rounded-xl hover:bg-primary/90 transition-colors">
-          Got it!
+        
+        <div className="mb-4 p-3 bg-primary/5 border border-primary/10 rounded-xl">
+          <p className="text-xs text-primary font-medium">Try this if the "Install" button didn't work:</p>
+        </div>
+
+        <div className="space-y-4">
+          <div>
+            <p className="text-[10px] font-black uppercase text-muted-foreground mb-2">For Chrome & Edge</p>
+            <ol className="space-y-1.5 text-xs text-muted-foreground">
+              <li>1. Tap the <strong className="text-foreground">Menu</strong> (3 dots)</li>
+              <li>2. Tap <strong className="text-foreground">"Install app"</strong> or <strong className="text-foreground">"Add to Home screen"</strong></li>
+            </ol>
+          </div>
+          
+          <div>
+            <p className="text-[10px] font-black uppercase text-muted-foreground mb-2">For Samsung Internet</p>
+            <ol className="space-y-1.5 text-xs text-muted-foreground">
+              <li>1. Tap the <strong className="text-foreground">Menu</strong> (3 lines)</li>
+              <li>2. Tap <strong className="text-foreground">"Add page to"</strong> &gt; <strong className="text-foreground">"Home screen"</strong></li>
+            </ol>
+          </div>
+
+          <div>
+            <p className="text-[10px] font-black uppercase text-muted-foreground mb-2">For Firefox</p>
+            <ol className="space-y-1.5 text-xs text-muted-foreground">
+              <li>1. Tap the <strong className="text-foreground">Menu</strong> (3 dots)</li>
+              <li>2. Tap <strong className="text-foreground">"Install"</strong> (external link icon)</li>
+            </ol>
+          </div>
+        </div>
+
+        <button onClick={() => setShowAndroidModal(false)} className="w-full mt-6 py-2.5 bg-primary text-primary-foreground font-semibold rounded-xl hover:bg-primary/90 transition-colors">
+          I Understand
         </button>
       </div>
     </div>

@@ -243,11 +243,34 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
           score: percentageScore,
           points_earned: totalScore,
           answers: answers,
+          status: 'graded', // Mark as graded since we did client-side grading
           time_taken_seconds: quiz?.duration_minutes 
             ? (quiz.duration_minutes * 60) - (timeRemaining || 0)
             : null
         })
         .eq('id', attemptId);
+
+      // Also insert into individual quiz_answers table for better analytics/grading tracking
+      const answerRecords = questions.map(q => {
+        const userAnswer = answers[q.id];
+        return {
+          attempt_id: attemptId,
+          question_id: q.id,
+          selected_options: q.question_type === 'multiple_choice' ? [userAnswer] : null,
+          text_answer: q.question_type !== 'multiple_choice' ? userAnswer : null,
+          is_correct: q.question_type === 'short_answer'
+            ? userAnswer?.toLowerCase().trim() === q.correct_answer.toLowerCase().trim()
+            : userAnswer === q.correct_answer,
+          marks_obtained: (q.question_type === 'short_answer'
+            ? userAnswer?.toLowerCase().trim() === q.correct_answer.toLowerCase().trim()
+            : userAnswer === q.correct_answer) ? q.marks : 0,
+          auto_graded: true
+        };
+      }).filter(r => r.question_id && (r.selected_options?.[0] || r.text_answer));
+
+      if (answerRecords.length > 0) {
+        await supabase.from('quiz_answers').insert(answerRecords);
+      }
 
       // Update leaderboard
       const { data: existingEntry } = await supabase
@@ -282,14 +305,14 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
 
     // Log academic activity for the dashboard
     try {
-      if (studentId) {
+      if (currentUserId) {
         await supabase.from('notifications').insert({
           title: 'Quiz Completed',
           message: `You completed the quiz "${quiz.title}" with a score of ${Math.round((totalScore / totalPoints) * 100)}%`,
           type: 'activity',
           audience: 'individual',
-          target_user_id: studentId,
-          created_by: studentId
+          target_user_id: currentUserId,
+          created_by: currentUserId
         });
       }
     } catch (err) {
