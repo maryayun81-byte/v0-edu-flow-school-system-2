@@ -5,10 +5,12 @@ import { createClient } from '@/lib/supabase/client';
 import {
   X, ChevronRight, ChevronLeft, Upload, FileText, Calendar,
   Users, BookOpen, Clock, AlertCircle, Loader2, Check, Image,
-  Layers, Target, Plus, Trash2, Search, UserCheck, Group
+  Layers, Target, Plus, Trash2, Search, UserCheck, Group, Pencil
+
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PremiumWorksheetBuilder from './PremiumWorksheetBuilder';
 
 const supabase = createClient();
 
@@ -46,6 +48,7 @@ const SUBMISSION_TYPES = [
   { value: 'WORKSHEET', label: 'Worksheet Submission', desc: 'Students upload completed worksheet (PDF, DOCX)', icon: FileText, color: 'indigo' },
   { value: 'PHOTO', label: 'Photo Submission', desc: 'Students photograph handwritten work and upload images', icon: Image, color: 'amber' },
   { value: 'MIXED', label: 'Mixed Submission', desc: 'Students may submit worksheet or photos — or both', icon: Layers, color: 'emerald' },
+  { value: 'INTERACTIVE', label: 'Online Worksheet', desc: 'Teachers build premium multi-page worksheets for students to complete online', icon: Target, color: 'indigo' },
 ];
 
 const FILE_TYPE_OPTIONS = [
@@ -78,7 +81,10 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
   const [dueDate, setDueDate] = useState('');
   const [dueTime, setDueTime] = useState('23:59');
   const [allowLate, setAllowLate] = useState(true);
-  const [submissionType, setSubmissionType] = useState<'WORKSHEET' | 'PHOTO' | 'MIXED'>('WORKSHEET');
+  const [submissionType, setSubmissionType] = useState<'WORKSHEET' | 'PHOTO' | 'MIXED' | 'INTERACTIVE'>('WORKSHEET');
+  const [showWorksheetBuilder, setShowWorksheetBuilder] = useState(false);
+  const [assignmentId, setAssignmentId] = useState<string | null>(null);
+  const [worksheetPagesCount, setWorksheetPagesCount] = useState(0);
 
   // Step 2 — Files
   const [filesToUpload, setFilesToUpload] = useState<AssignmentFile[]>([]);
@@ -302,36 +308,50 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
 
   async function handleSubmit(publishNow: boolean) {
     if (submitting) return;
+    
+    // If it's an interactive worksheet and we haven't created the assignment ID yet, 
+    // we need to save it as a draft first before opening the builder.
+    // However, the builder is usually opened in Step 2.
+    // Let's refine the logic: Step 2 for INTERACTIVE will be the Builder.
+    
     setSubmitting(true);
     setError('');
 
     try {
-      // 1. Create assignment record
-      const { data: assignment, error: aErr } = await supabase
-        .from('assignments')
-        .insert({
-          title,
-          teacher_id: userId,
-          class_id: selectedClassId,
-          subject_id: selectedSubjectId,
-          tuition_event_id: selectedEventId || null,
-          description: instructions,
-          instructions,
-          estimated_minutes: estimatedMinutes,
-          due_date: `${dueDate}T${dueTime}:00`,
-          allow_late_submission: allowLate,
-          submission_type: submissionType,
-          visibility_type: visibilityType,
-          type: 'OFFLINE_DOCUMENT_BASED',
-          total_marks: 100,
-          status: publishNow ? 'PUBLISHED' : 'DRAFT',
-          published_at: publishNow ? new Date().toISOString() : null,
-        })
-        .select()
-        .single();
+      // 1. Create or Update assignment record
+      const payload = {
+        title,
+        teacher_id: userId,
+        class_id: selectedClassId,
+        subject_id: selectedSubjectId,
+        tuition_event_id: selectedEventId || null,
+        description: instructions,
+        instructions,
+        estimated_minutes: estimatedMinutes,
+        due_date: `${dueDate}T${dueTime}:00`,
+        allow_late_submission: allowLate,
+        submission_type: submissionType,
+        visibility_type: visibilityType,
+        type: submissionType === 'INTERACTIVE' ? 'ONLINE_WORKSHEET' : 'OFFLINE_DOCUMENT_BASED',
+        total_marks: 100,
+        status: publishNow ? 'PUBLISHED' : 'DRAFT',
+        published_at: publishNow ? new Date().toISOString() : null,
+      };
 
-      if (aErr) throw aErr;
-      const assignmentId = assignment.id;
+      let currentAssignmentId = assignmentId;
+
+      if (currentAssignmentId) {
+        await supabase.from('assignments').update(payload).eq('id', currentAssignmentId);
+      } else {
+        const { data, error: aErr } = await supabase
+          .from('assignments')
+          .insert(payload)
+          .select()
+          .single();
+        if (aErr) throw aErr;
+        currentAssignmentId = data.id;
+        setAssignmentId(currentAssignmentId);
+      }
 
       // 2. Upload files to Supabase Storage and record them
       for (const af of filesToUpload) {
@@ -600,59 +620,139 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
           {/* ── STEP 2: RESOURCES ── */}
           {step === 2 && (
             <div className="space-y-5 animate-in slide-in-from-right-4 fade-in duration-300">
-              <div>
-                <h3 className="text-white font-semibold text-lg">Upload Assignment Resources</h3>
-                <p className="text-slate-400 text-sm mt-1">Add question papers, worksheets, and reference materials. Students will be able to download these.</p>
-              </div>
+              
+              {submissionType === 'INTERACTIVE' ? (
+                <div className="space-y-6">
+                  <div className="p-8 bg-indigo-500/5 border border-indigo-500/20 rounded-[2rem] text-center">
+                    <Target className="w-16 h-16 text-indigo-400 mx-auto mb-4" />
+                    <h3 className="text-xl font-bold text-white uppercase tracking-tight">Digital Worksheet Architect</h3>
+                    <p className="text-slate-400 text-sm mt-2 max-w-sm mx-auto">
+                      Build a premium, multi-page interactive worksheet with custom questions, marks, and hints.
+                    </p>
+                    
+                    <div className="mt-8 flex flex-col items-center gap-4">
+                      <button
+                        onClick={async () => {
+                          if (!assignmentId) {
+                            // Ensure assignment exists as draft first
+                            setSubmitting(true);
+                            try {
+                              const payload = {
+                                title,
+                                teacher_id: userId,
+                                class_id: selectedClassId,
+                                subject_id: selectedSubjectId,
+                                due_date: `${dueDate}T${dueTime}:00`,
+                                allow_late_submission: allowLate,
+                                type: 'ONLINE_AUTO_GRADED', // valid enum value
+                                total_marks: 100,
+                                status: 'DRAFT',
+                              };
+                              console.log('Creating assignment draft:', payload);
+                              const { data, error } = await supabase.from('assignments').insert(payload).select().single();
+                              if (error) {
+                                console.error('Assignment insert error:', error);
+                                alert(`Error: ${error.message}`);
+                                return;
+                              }
+                              console.log('Assignment created:', data);
+                              setAssignmentId(data.id);
+                              setShowWorksheetBuilder(true);
+                            } catch (err: any) {
+                              console.error('Unexpected error:', err);
+                              alert(`Unexpected error: ${err.message}`);
+                            } finally {
+                              setSubmitting(false);
+                            }
+                          } else {
+                            setShowWorksheetBuilder(true);
+                          }
+                        }}
 
-              {/* Upload area */}
-              <label className="flex flex-col items-center justify-center gap-3 w-full h-36 border-2 border-dashed border-slate-600 rounded-2xl hover:border-indigo-500 hover:bg-slate-800/30 cursor-pointer transition-all group">
-                <input
-                  type="file"
-                  multiple
-                  className="hidden"
-                  accept=".pdf,.docx,.doc,.png,.jpg,.jpeg"
-                  onChange={e => {
-                    Array.from(e.target.files || []).forEach(f => addFile(f, 'QUESTION_PAPER'));
-                    e.target.value = '';
-                  }}
-                />
-                <Upload className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 transition-colors" />
-                <div className="text-center">
-                  <p className="text-slate-300 font-medium group-hover:text-white transition-colors">Click to upload files</p>
-                  <p className="text-slate-500 text-sm">PDF, DOCX, PNG, JPG supported</p>
-                </div>
-              </label>
-
-              {/* File list */}
-              {filesToUpload.length > 0 && (
-                <div className="space-y-2">
-                  {filesToUpload.map((af, idx) => (
-                    <div key={idx} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
-                      <FileText className="w-5 h-5 text-indigo-400 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-medium truncate">{af.file.name}</p>
-                        <p className="text-slate-500 text-xs">{(af.file.size / 1024).toFixed(0)} KB</p>
-                      </div>
-                      <select
-                        value={af.fileType}
-                        onChange={e => changeFileType(idx, e.target.value as any)}
-                        className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        className="px-8 py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
                       >
-                        {FILE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                      <button onClick={() => removeFile(idx)} className="p-1.5 hover:bg-red-500/20 rounded-lg text-slate-500 hover:text-red-400 transition-colors">
-                        <Trash2 className="w-4 h-4" />
+                        <Pencil className="w-4 h-4" />
+                        {assignmentId ? 'Modify Worksheet Blueprint' : 'Initialize Worksheet Blueprint'}
                       </button>
+                      
+                      {assignmentId && (
+                        <div className="flex items-center gap-2 text-[10px] font-bold text-emerald-400 uppercase tracking-widest">
+                          <Check className="w-3 h-3" /> Blueprint Linked: {assignmentId.split('-')[0]}...
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  </div>
+                  
+                  {/* Worksheet Overlay Modal */}
+                  {showWorksheetBuilder && assignmentId && (
+                    <div className="fixed inset-0 z-[100] bg-black">
+                      <PremiumWorksheetBuilder 
+                        assignmentId={assignmentId} 
+                        onClose={() => setShowWorksheetBuilder(false)}
+                        onSave={() => {
+                          // Could fetch page count here if needed
+                        }}
+                      />
+                    </div>
+                  )}
                 </div>
-              )}
+              ) : (
+                <>
+                  <div>
+                    <h3 className="text-white font-semibold text-lg">Upload Assignment Resources</h3>
+                    <p className="text-slate-400 text-sm mt-1">Add question papers, worksheets, and reference materials. Students will be able to download these.</p>
+                  </div>
 
-              {filesToUpload.length === 0 && (
-                <div className="text-center py-6 text-slate-500 text-sm">
-                  No files added. You can skip this step and add files later.
-                </div>
+                  {/* Upload area */}
+                  <label className="flex flex-col items-center justify-center gap-3 w-full h-36 border-2 border-dashed border-slate-600 rounded-2xl hover:border-indigo-500 hover:bg-slate-800/30 cursor-pointer transition-all group">
+                    <input
+                      type="file"
+                      multiple
+                      className="hidden"
+                      accept=".pdf,.docx,.doc,.png,.jpg,.jpeg"
+                      onChange={e => {
+                        Array.from(e.target.files || []).forEach(f => addFile(f, 'QUESTION_PAPER'));
+                        e.target.value = '';
+                      }}
+                    />
+                    <Upload className="w-8 h-8 text-slate-500 group-hover:text-indigo-400 transition-colors" />
+                    <div className="text-center">
+                      <p className="text-slate-300 font-medium group-hover:text-white transition-colors">Click to upload files</p>
+                      <p className="text-slate-500 text-sm">PDF, DOCX, PNG, JPG supported</p>
+                    </div>
+                  </label>
+
+                  {/* File list */}
+                  {filesToUpload.length > 0 && (
+                    <div className="space-y-2">
+                      {filesToUpload.map((af, idx) => (
+                        <div key={idx} className="flex items-center gap-3 p-3 bg-slate-800/60 rounded-xl border border-slate-700">
+                          <FileText className="w-5 h-5 text-indigo-400 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-medium truncate">{af.file.name}</p>
+                            <p className="text-slate-500 text-xs">{(af.file.size / 1024).toFixed(0)} KB</p>
+                          </div>
+                          <select
+                            value={af.fileType}
+                            onChange={e => changeFileType(idx, e.target.value as any)}
+                            className="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-white text-xs focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                          >
+                            {FILE_TYPE_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                          </select>
+                          <button onClick={() => removeFile(idx)} className="p-1.5 hover:bg-red-500/20 rounded-lg text-slate-500 hover:text-red-400 transition-colors">
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {filesToUpload.length === 0 && (
+                    <div className="text-center py-6 text-slate-500 text-sm">
+                      No files added. You can skip this step and add files later.
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

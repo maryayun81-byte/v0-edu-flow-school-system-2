@@ -15,10 +15,11 @@ EXCEPTION
 END $$;
 
 DO $$ BEGIN
-    CREATE TYPE submission_status_enum AS ENUM ('NOT_SUBMITTED', 'SUBMITTED', 'MARKED', 'LATE');
+    CREATE TYPE submission_status_enum AS ENUM ('NOT_SUBMITTED', 'SUBMITTED', 'MARKED', 'RETURNED', 'GRADED', 'LATE');
 EXCEPTION
     WHEN duplicate_object THEN null;
 END $$;
+
 
 -- 2. Create Assignments Table
 CREATE TABLE IF NOT EXISTS assignments (
@@ -110,24 +111,27 @@ ALTER TABLE submission_answers ENABLE ROW LEVEL SECURITY;
 
 -- ASSIGNMENTS
 -- Teachers can manage their own assignments
+DROP POLICY IF EXISTS "Teachers can manage own assignments" ON assignments;
 CREATE POLICY "Teachers can manage own assignments" 
 ON assignments FOR ALL 
 USING (auth.uid() = teacher_id)
 WITH CHECK (auth.uid() = teacher_id);
 
 -- Students can view assignments for their class
+DROP POLICY IF EXISTS "Students see assignments for their class" ON assignments;
 CREATE POLICY "Students see assignments for their class" 
 ON assignments FOR SELECT 
 USING (
     EXISTS (
-        SELECT 1 FROM student_profiles 
-        WHERE student_profiles.student_id = auth.uid() 
-        AND student_profiles.class_id = assignments.class_id
+        SELECT 1 FROM student_classes 
+        WHERE student_classes.student_id = auth.uid() 
+        AND student_classes.class_id = assignments.class_id
     )
 );
 
 -- QUESTIONS
 -- Teachers manage questions
+DROP POLICY IF EXISTS "Teachers manage questions" ON assignment_questions;
 CREATE POLICY "Teachers manage questions" 
 ON assignment_questions FOR ALL 
 USING (
@@ -139,25 +143,29 @@ USING (
 );
 
 -- Students can view questions (BUT we will hide correct_answer in API selection)
+DROP POLICY IF EXISTS "Students view questions" ON assignment_questions;
 CREATE POLICY "Students view questions" 
 ON assignment_questions FOR SELECT 
 USING (
     EXISTS (
         SELECT 1 FROM assignments 
-        JOIN student_profiles ON student_profiles.class_id = assignments.class_id
+        JOIN student_classes ON student_classes.class_id = assignments.class_id
         WHERE assignments.id = assignment_id 
-        AND student_profiles.student_id = auth.uid()
+        AND student_classes.student_id = auth.uid()
         AND assignments.status IN ('PUBLISHED', 'CLOSED')
     )
 );
 
+
 -- SUBMISSIONS
 -- Students manage their own submissions
+DROP POLICY IF EXISTS "Students manage own submissions" ON student_submissions;
 CREATE POLICY "Students manage own submissions" 
 ON student_submissions FOR ALL 
 USING (student_id = auth.uid());
 
 -- Teachers view submissions for their assignments
+DROP POLICY IF EXISTS "Teachers view submissions" ON student_submissions;
 CREATE POLICY "Teachers view submissions" 
 ON student_submissions FOR SELECT 
 USING (
@@ -169,6 +177,7 @@ USING (
 );
 
 -- Teachers can update submissions (grading)
+DROP POLICY IF EXISTS "Teachers grade submissions" ON student_submissions;
 CREATE POLICY "Teachers grade submissions" 
 ON student_submissions FOR UPDATE
 USING (
@@ -181,6 +190,7 @@ USING (
 
 
 -- ANSWERS
+DROP POLICY IF EXISTS "Students manage own answers" ON submission_answers;
 CREATE POLICY "Students manage own answers" 
 ON submission_answers FOR ALL 
 USING (
@@ -191,6 +201,7 @@ USING (
     )
 );
 
+DROP POLICY IF EXISTS "Teachers view answers" ON submission_answers;
 CREATE POLICY "Teachers view answers" 
 ON submission_answers FOR SELECT 
 USING (
@@ -201,6 +212,7 @@ USING (
         AND assignments.teacher_id = auth.uid()
     )
 );
+
 
 -- 8. RPC Function for Secure Grading (To be implemented fully later)
 -- This placeholder ensures we have the structure

@@ -6,11 +6,13 @@ import {
   FileText, Clock, CheckCircle2, AlertCircle, ArrowLeft,
   Download, Upload, Image, Camera, Trash2, Loader2, Send,
   XCircle, Eye, Star, TrendingUp, TrendingDown, BookOpen,
-  ChevronRight, MessageSquare, Flag
+  ChevronRight, MessageSquare, Flag, Pencil
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import PremiumWorksheetPlayer from './PremiumWorksheetPlayer';
+import { generateAssignmentPDFReport } from '@/lib/reports/assignment-report-generator';
 
 const supabase = createClient();
 
@@ -19,7 +21,8 @@ interface Assignment {
   title: string;
   instructions?: string;
   due_date: string;
-  submission_type: 'WORKSHEET' | 'PHOTO' | 'MIXED';
+  submission_type: 'WORKSHEET' | 'PHOTO' | 'MIXED' | 'INTERACTIVE';
+  type: string;
   allow_late_submission: boolean;
   total_marks: number;
   estimated_minutes?: number;
@@ -40,9 +43,21 @@ interface StudentSubmission {
   id: string;
   status: string;
   submitted_at: string;
+  score?: number; // Instant score from submission record
+  marked_file_url?: string;
   submission_files?: { id: string; file_name: string; file_url: string; file_type: string }[];
-  submission_feedback?: { score: number; strengths: string[]; weaknesses: string[]; is_returned: boolean }[];
+  submission_feedback?: { 
+    score: number; 
+    strengths: string[]; 
+    weaknesses: string[]; 
+    improvement_suggestions?: string[];
+    is_returned: boolean 
+  }[];
   submission_annotations?: { annotation_data: any[] }[];
+  strengths?: string[];
+  weaknesses?: string[];
+  improvement_suggestions?: string[];
+  teacher_remarks?: string;
 }
 
 interface Props {
@@ -59,6 +74,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
   const [reportModalOpen, setReportModalOpen] = useState(false);
   const [reportReason, setReportReason] = useState('');
   const [reportSending, setReportSending] = useState(false);
+  const [showWorksheetPlayer, setShowWorksheetPlayer] = useState(false);
 
   const isOverdue = new Date(assignment.due_date) < new Date();
   const canSubmit = !submission && (!isOverdue || assignment.allow_late_submission);
@@ -199,6 +215,18 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
           Due {format(new Date(assignment.due_date), 'EEEE, MMMM d, yyyy')} at {format(new Date(assignment.due_date), 'h:mm a')}
           {isOverdue && <span className="text-red-400 font-bold ml-1">— OVERDUE</span>}
         </div>
+        {assignment.type === 'ONLINE_WORKSHEET' && !submission && (
+           <div className="pt-6">
+              <button 
+                onClick={() => setShowWorksheetPlayer(true)}
+                className="w-full flex items-center justify-center gap-3 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all shadow-xl shadow-indigo-500/20 active:scale-[0.98]"
+              >
+                <Pencil className="w-4 h-4" />
+                Start Interactive Worksheet
+              </button>
+           </div>
+        )}
+
         {assignment.instructions && (
           <div className="pt-3 border-t border-border/50">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Instructions</p>
@@ -206,6 +234,21 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
           </div>
         )}
       </div>
+
+      {showWorksheetPlayer && (
+        <div className="fixed inset-0 z-[100] bg-black">
+          <PremiumWorksheetPlayer 
+            assignmentId={assignment.id} 
+            studentId={studentId} 
+            submissionId={submission?.id}
+            onClose={() => setShowWorksheetPlayer(false)}
+            onSubmit={() => {
+               setShowWorksheetPlayer(false);
+               onBack(); // Refresh list
+            }}
+          />
+        </div>
+      )}
 
       {/* Resource Files */}
       {assignment.assignment_files && assignment.assignment_files.length > 0 && (
@@ -277,20 +320,20 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-foreground">Teacher Feedback</h4>
                 <div className="flex items-center gap-3">
-                  {feedback.score != null && (
+                  {(feedback?.score ?? submission.score) != null && (
                     <div className="text-right">
-                      <div className="text-3xl font-black text-amber-400">{feedback.score}</div>
+                      <div className="text-3xl font-black text-amber-400">{feedback?.score ?? submission.score}</div>
                       <div className="text-xs text-muted-foreground">/ {assignment.total_marks}</div>
                     </div>
                   )}
-                  {feedback.score != null && (
+                  {(feedback?.score ?? submission.score) != null && (
                     <div className={cn(
                       "w-14 h-14 rounded-full flex items-center justify-center text-sm font-bold border-2",
-                      feedback.score / assignment.total_marks >= 0.7 ? 'border-emerald-400 text-emerald-400' :
-                      feedback.score / assignment.total_marks >= 0.5 ? 'border-amber-400 text-amber-400' :
+                      (feedback?.score ?? submission.score)! / assignment.total_marks >= 0.7 ? 'border-emerald-400 text-emerald-400' :
+                      (feedback?.score ?? submission.score)! / assignment.total_marks >= 0.5 ? 'border-amber-400 text-amber-400' :
                       'border-red-400 text-red-400'
                     )}>
-                      {Math.round((feedback.score / assignment.total_marks) * 100)}%
+                      {Math.round(((feedback?.score ?? submission.score)! / assignment.total_marks) * 100)}%
                     </div>
                   )}
                 </div>
@@ -312,19 +355,103 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                 </div>
               )}
 
-              {feedback.weaknesses && feedback.weaknesses.length > 0 && (
+              {((feedback?.weaknesses || submission.weaknesses) && (feedback?.weaknesses || submission.weaknesses)!.length > 0) && (
                 <div>
                   <p className="text-xs font-semibold text-red-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <TrendingDown className="w-3.5 h-3.5" /> Areas for Improvement
                   </p>
                   <div className="space-y-1.5">
-                    {feedback.weaknesses.map((w, i) => (
+                    {(feedback?.weaknesses || submission.weaknesses)!.map((w, i) => (
                       <div key={i} className="flex items-start gap-2 text-sm">
-                        <XCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+                        <CheckCircle2 className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
                         <span className="text-foreground">{w}</span>
                       </div>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {(feedback?.improvement_suggestions || submission.improvement_suggestions) && (feedback?.improvement_suggestions || submission.improvement_suggestions)!.length > 0 && (
+                <div>
+                  <p className="text-xs font-semibold text-indigo-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
+                    <Pencil className="w-3.5 h-3.5" /> Tactical Recommendations
+                  </p>
+                  <div className="space-y-1.5">
+                    {(feedback?.improvement_suggestions || submission.improvement_suggestions)!.map((imp: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2 text-sm">
+                        <Star className="w-4 h-4 text-indigo-400 shrink-0 mt-0.5" />
+                        <span className="text-foreground">{imp}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {submission.teacher_remarks && (
+                <div className="p-4 bg-slate-800/50 border border-slate-700 rounded-xl">
+                   <p className="text-xs font-black text-slate-500 uppercase tracking-widest mb-2">Executive Summary</p>
+                   <p className="text-sm italic text-slate-300 leading-relaxed">"{submission.teacher_remarks}"</p>
+                </div>
+              )}
+
+              {/* Strategic Evaluation Output (Marked Script) */}
+              {assignment.type === 'ONLINE_WORKSHEET' && isReturned && (
+                <button
+                  onClick={() => setShowWorksheetPlayer(true)}
+                  className="w-full flex items-center justify-between p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl hover:bg-indigo-500/20 transition-all group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-500/20 rounded-xl group-hover:scale-110 transition-transform">
+                      <FileText className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">Graded Interactive Script</p>
+                      <p className="text-sm font-bold text-white">Review Annotated Worksheet</p>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-5 h-5 text-indigo-400" />
+                </button>
+              )}
+
+              {submission.marked_file_url && (
+                <div className="p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-500/20 rounded-lg">
+                      <FileText className="w-5 h-5 text-indigo-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-indigo-300 uppercase tracking-tighter">Annotated Marking Script</p>
+                      <p className="text-[10px] text-indigo-400/60 font-bold uppercase tracking-widest">Enterprise Digital Assessment Final</p>
+                    </div>
+                  </div>
+                   <button 
+                    onClick={() => generateAssignmentPDFReport(submission.id)}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg group-hover:scale-105"
+                  >
+                    <Download className="w-4 h-4" />
+                    Secure Download
+                  </button>
+                </div>
+              )}
+
+              {submission.status === 'RETURNED' && assignment.type === 'ONLINE_WORKSHEET' && (
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between group">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-emerald-500/20 rounded-lg">
+                      <Star className="w-5 h-5 text-emerald-400" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-emerald-300 uppercase tracking-tighter">Evaluation Report</p>
+                      <p className="text-[10px] text-emerald-400/60 font-bold uppercase tracking-widest">Generate Professional PDF Script</p>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => generateAssignmentPDFReport(submission.id)}
+                    className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg group-hover:scale-105"
+                  >
+                    <Download className="w-4 h-4" />
+                    Export Report
+                  </button>
                 </div>
               )}
 
@@ -342,7 +469,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
       )}
 
       {/* ── SUBMISSION FORM (not yet submitted) ── */}
-      {canSubmit && (
+      {canSubmit && assignment.type !== 'ONLINE_WORKSHEET' && (
         <div className="bg-card border border-border/50 rounded-2xl p-5 space-y-4">
           <h3 className="font-semibold text-foreground">Submit Your Work</h3>
 
@@ -507,12 +634,27 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
 
       const recipientIds = recipientRows?.map((r: any) => r.assignment_id) || [];
 
-      // Also get class-wide assignments
+      // Also get class-wide assignments (Check both legacy student_classes and new student_subject_enrollments)
       const { data: classRows } = await supabase
         .from('student_classes')
         .select('class_id')
         .eq('student_id', studentId);
-      const classIds = classRows?.map((c: any) => c.class_id) || [];
+        
+      const { data: enrollmentRows } = await supabase
+        .from('student_subject_enrollments')
+        .select('class_id')
+        .eq('student_id', studentId);
+
+      const legacyClassIds = classRows?.map((c: any) => c.class_id) || [];
+      const enrollmentClassIds = enrollmentRows?.map((c: any) => c.class_id) || [];
+      
+      const classIds = Array.from(new Set([...legacyClassIds, ...enrollmentClassIds]));
+
+      if (recipientIds.length === 0 && classIds.length === 0) {
+        setAssignments([]);
+        setLoading(false);
+        return;
+      }
 
       let query = supabase
         .from('assignments')
@@ -656,11 +798,11 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
                           {assignment.subjects?.name} · {assignment.classes?.name}
                         </p>
                       </div>
-                      {isMarked && feedback?.score != null && (
+                      {isMarked && (feedback?.score ?? sub.score) != null && (
                         <div className="text-right shrink-0">
-                          <div className="text-xl font-black text-amber-400">{feedback.score}/{assignment.total_marks}</div>
+                          <div className="text-xl font-black text-amber-400">{(feedback?.score ?? sub.score)}/{assignment.total_marks}</div>
                           <div className="text-xs text-muted-foreground">
-                            {Math.round((feedback.score / assignment.total_marks) * 100)}%
+                            {Math.round(((feedback?.score ?? sub.score)! / assignment.total_marks) * 100)}%
                           </div>
                         </div>
                       )}

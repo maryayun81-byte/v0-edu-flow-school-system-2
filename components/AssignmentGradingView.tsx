@@ -34,6 +34,9 @@ interface StudentSubmission {
     teacher_feedback: string | null;
     attachment_urls: string[];
     submission_content: string;
+    strengths?: string[];
+    weaknesses?: string[];
+    improvement_suggestions?: string[];
   } | null;
 }
 
@@ -46,6 +49,9 @@ export default function AssignmentGradingView({ assignment, onClose }: Assignmen
   // Grading State
   const [gradeScore, setGradeScore] = useState<number | string>(''); // string allowed for empty input
   const [feedback, setFeedback] = useState('');
+  const [strengths, setStrengths] = useState<string[]>([]);
+  const [weaknesses, setWeaknesses] = useState<string[]>([]);
+  const [improvements, setImprovements] = useState<string[]>([]);
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -56,9 +62,15 @@ export default function AssignmentGradingView({ assignment, onClose }: Assignmen
     if (selectedStudent?.submission) {
       setGradeScore(selectedStudent.submission.score ?? '');
       setFeedback(selectedStudent.submission.teacher_feedback ?? '');
+      setStrengths(selectedStudent.submission.strengths || []);
+      setWeaknesses(selectedStudent.submission.weaknesses || []);
+      setImprovements(selectedStudent.submission.improvement_suggestions || []);
     } else {
       setGradeScore('');
       setFeedback('');
+      setStrengths([]);
+      setWeaknesses([]);
+      setImprovements([]);
     }
   }, [selectedStudent]);
 
@@ -145,6 +157,9 @@ export default function AssignmentGradingView({ assignment, onClose }: Assignmen
             .update({
                 score: scoreVal,
                 teacher_feedback: feedback,
+                strengths,
+                weaknesses,
+                improvement_suggestions: improvements,
                 status: 'GRADED'
             })
             .eq('id', selectedStudent.submission.id);
@@ -349,11 +364,82 @@ export default function AssignmentGradingView({ assignment, onClose }: Assignmen
                                    </div>
                                </div>
 
+                                {/* Structured Feedback */}
+                                <div className="grid md:grid-cols-3 gap-6 pt-4 border-t border-slate-700/50">
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-emerald-500 uppercase tracking-widest">Strengths</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {strengths.map((s, i) => (
+                                                <span key={i} className="px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded flex items-center gap-1">
+                                                    {s}
+                                                    <button onClick={() => setStrengths(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                                                </span>
+                                            ))}
+                                            <input 
+                                                placeholder="+ Add"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        const val = (e.target as HTMLInputElement).value;
+                                                        if (val) setStrengths(prev => [...prev, val]);
+                                                        (e.target as HTMLInputElement).value = '';
+                                                    }
+                                                }}
+                                                className="bg-transparent border-b border-slate-700 text-[10px] py-1 focus:outline-none focus:border-emerald-500 w-20"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-rose-500 uppercase tracking-widest">Weaknesses</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {weaknesses.map((w, i) => (
+                                                <span key={i} className="px-2 py-1 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold rounded flex items-center gap-1">
+                                                    {w}
+                                                    <button onClick={() => setWeaknesses(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                                                </span>
+                                            ))}
+                                            <input 
+                                                placeholder="+ Add"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        const val = (e.target as HTMLInputElement).value;
+                                                        if (val) setWeaknesses(prev => [...prev, val]);
+                                                        (e.target as HTMLInputElement).value = '';
+                                                    }
+                                                }}
+                                                className="bg-transparent border-b border-slate-700 text-[10px] py-1 focus:outline-none focus:border-rose-500 w-20"
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="space-y-3">
+                                        <label className="text-[10px] font-black text-indigo-500 uppercase tracking-widest">Improvements</label>
+                                        <div className="flex flex-wrap gap-2">
+                                            {improvements.map((imp, i) => (
+                                                <span key={i} className="px-2 py-1 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded flex items-center gap-1">
+                                                    {imp}
+                                                    <button onClick={() => setImprovements(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                                                </span>
+                                            ))}
+                                            <input 
+                                                placeholder="+ Add"
+                                                onKeyDown={(e) => {
+                                                    if (e.key === 'Enter') {
+                                                        const val = (e.target as HTMLInputElement).value;
+                                                        if (val) setImprovements(prev => [...prev, val]);
+                                                        (e.target as HTMLInputElement).value = '';
+                                                    }
+                                                }}
+                                                className="bg-transparent border-b border-slate-700 text-[10px] py-1 focus:outline-none focus:border-indigo-500 w-20"
+                                            />
+                                        </div>
+                                    </div>
+                                </div>
+
                                <div className="flex justify-end pt-4 border-t border-slate-700/50">
                                    <Button 
                                      onClick={handleSaveGrade}
                                      disabled={isSaving}
-                                     className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold px-8 shadow-lg shadow-emerald-500/20"
                                    >
                                        {isSaving ? 'Saving...' : 'Save Grade'}
                                    </Button>

@@ -8,17 +8,36 @@ import {
   ArrowLeft, BarChart2, Loader2, Image, Plus, Star, Minus,
   Pen, Square, Circle, Type, Highlighter, Eraser, Check,
   X, Save, Send, MessageSquare, Trophy, TrendingUp, TrendingDown,
-  RefreshCw, ZoomIn, ZoomOut, Layers
+  RefreshCw, ZoomIn, ZoomOut, Layers, CloudOff, ChevronLeft, ChevronRight
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
-import { toast } from 'sonner';
 import EnterpriseAssignmentCreator from './EnterpriseAssignmentCreator';
+import PremiumWorksheetMarking from './PremiumWorksheetMarking';
+import AssignmentAnalyticsDashboard from './AssignmentAnalyticsDashboard';
+import { jsPDF } from 'jspdf';
+import html2canvas from 'html2canvas';
+import { toast } from 'sonner';
 
 const supabase = createClient();
 
 type FilterStatus = 'ALL' | 'SUBMITTED' | 'MARKED' | 'NOT_SUBMITTED' | 'LATE';
 type MarkerTool = 'pen' | 'highlighter' | 'tick' | 'cross' | 'text' | 'eraser' | 'circle' | 'underline' | 'comment';
+
+interface Annotation {
+  id?: string;
+  submission_id?: string;
+  page_number: number;
+  tool_type: MarkerTool;
+  x_position: number;
+  y_position: number;
+  width?: number;
+  height?: number;
+  color: string;
+  stroke_width: number;
+  text_content?: string;
+  points?: { x: number; y: number }[]; // For freehand pen/highlighter
+}
 
 interface Assignment {
   id: string;
@@ -27,6 +46,7 @@ interface Assignment {
   subject_id: string;
   due_date: string;
   submission_type: string;
+  type?: string;
   visibility_type: string;
   status: string;
   total_marks: number;
@@ -50,9 +70,10 @@ interface Submission {
 
 import * as pdfjsLib from 'pdfjs-dist';
 
-// Try to set workerSrc for pdfjs. We use unpkg or cdnjs as a fallback for the worker.
 if (typeof window !== 'undefined' && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`;
+  // Use a stable, specific version for the worker to avoid mismatches
+  const PKG_VERSION = '5.5.207';
+  pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PKG_VERSION}/pdf.worker.min.mjs`;
 }
 
 interface MarkingState {
@@ -64,7 +85,17 @@ interface MarkingState {
 }
 
 // ─── DIGITAL MARKING CANVAS ─────────────────────────────────────────
-function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: string; onAnnotationsChange: (data: any[]) => void }) {
+function DigitalMarkingCanvas({ 
+  imageUrl, 
+  annotations, 
+  onAnnotationsChange,
+  pageNumber = 1 
+}: { 
+  imageUrl: string; 
+  annotations: Annotation[]; 
+  onAnnotationsChange: (data: Annotation[]) => void;
+  pageNumber?: number;
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
   const [tool, setTool] = useState<MarkerTool>('pen');
@@ -72,23 +103,37 @@ function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: str
   const [lineWidth, setLineWidth] = useState(3);
   const [isDrawing, setIsDrawing] = useState(false);
   
-  const [pdfGenerating, setPdfGenerating] = useState(imageUrl.toLowerCase().endsWith('.pdf'));
+  const isPdf = imageUrl.toLowerCase().split('?')[0].endsWith('.pdf') || imageUrl.toLowerCase().includes('pdf');
+  const [pdfGenerating, setPdfGenerating] = useState(isPdf);
   const [finalImageUrl, setFinalImageUrl] = useState(imageUrl);
   const [imgSize, setImgSize] = useState({ w: 800, h: 1100 });
 
   useEffect(() => {
+    console.log('DigitalMarkingCanvas mounted/updated. imageUrl:', imageUrl, 'isPdf:', isPdf);
+  }, [imageUrl, isPdf]);
+
+  useEffect(() => {
     let active = true;
     async function initPdf() {
-      if (!imageUrl.toLowerCase().endsWith('.pdf')) {
+      if (!isPdf) {
         setFinalImageUrl(imageUrl);
         setPdfGenerating(false);
         return;
       }
       
       try {
+        console.log('Starting PDF rendering for:', imageUrl);
         setPdfGenerating(true);
-        const loadingTask = pdfjsLib.getDocument(imageUrl);
+        if (typeof (window as any).pdfjsLib === 'undefined' && !pdfjsLib) {
+          throw new Error('PDF.js library not loaded');
+        }
+        
+        const loadingTask = pdfjsLib.getDocument({
+          url: imageUrl,
+          withCredentials: false
+        });
         const pdf = await loadingTask.promise;
+        console.log(`PDF loaded. Pages: ${pdf.numPages}`);
         const numPages = Math.min(pdf.numPages, 5); // Limit to 5 pages to prevent massive canvases
         
         const canvases = [];
@@ -124,8 +169,13 @@ function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: str
             setFinalImageUrl(finalCanvas.toDataURL('image/jpeg', 0.8));
           }
         }
-      } catch (err) {
+      } catch (err: any) {
         console.error('PDF render error:', err);
+        // Fallback or specific error info
+        if (err.message?.includes('worker')) {
+          console.warn('PDF Worker failure detected. Attempting to reload worker from backup CDN...');
+          pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+        }
       } finally {
         if (active) setPdfGenerating(false);
       }
@@ -133,6 +183,65 @@ function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: str
     initPdf();
     return () => { active = false; };
   }, [imageUrl]);
+
+  const [currentAnnotation, setCurrentAnnotation] = useState<Annotation | null>(null);
+
+  const redrawAnnotations = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Render all persistent annotations + current draft
+    const allToRender = [...annotations.filter(a => a.page_number === pageNumber)];
+    if (currentAnnotation) allToRender.push(currentAnnotation);
+
+    allToRender.forEach(renderSingleAnnotation);
+  }, [annotations, currentAnnotation, pageNumber]);
+
+  const renderSingleAnnotation = (ann: Annotation) => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx) return;
+
+    ctx.save();
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = ann.color;
+    ctx.lineWidth = ann.stroke_width;
+
+    if (ann.tool_type === 'pen' || ann.tool_type === 'highlighter' || ann.tool_type === 'eraser') {
+      if (ann.tool_type === 'highlighter') ctx.globalAlpha = 0.3;
+      if (ann.tool_type === 'eraser') { ctx.strokeStyle = 'white'; ctx.lineWidth = 20; }
+      
+      if (ann.points && ann.points.length > 0) {
+        ctx.beginPath();
+        ctx.moveTo(ann.points[0].x, ann.points[0].y);
+        ann.points.forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.stroke();
+      }
+    } else if (ann.tool_type === 'tick' || ann.tool_type === 'cross' || ann.tool_type === 'text') {
+      ctx.font = `bold ${ann.tool_type === 'text' ? 18 : 36}px sans-serif`;
+      ctx.fillStyle = ann.color;
+      ctx.fillText(ann.tool_type === 'tick' ? '✓' : ann.tool_type === 'cross' ? '✗' : ann.text_content || '...', ann.x_position - 15, ann.y_position + 15);
+    } else if (ann.tool_type === 'circle') {
+      ctx.beginPath();
+      ctx.arc(ann.x_position, ann.y_position, ann.width || 0, 0, 2 * Math.PI);
+      ctx.stroke();
+    } else if (ann.tool_type === 'underline') {
+      ctx.beginPath();
+      ctx.moveTo(ann.x_position, ann.y_position);
+      ctx.lineTo(ann.x_position + (ann.width || 0), ann.y_position + (ann.height || 0));
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
+  useEffect(() => {
+    redrawAnnotations();
+  }, [redrawAnnotations, imgSize]);
 
   const lastPos = useRef<{ x: number; y: number } | null>(null);
   const startPos = useRef<{ x: number; y: number } | null>(null);
@@ -167,70 +276,63 @@ function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: str
     setIsDrawing(true);
 
     if (tool === 'tick' || tool === 'cross' || tool === 'text') {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      ctx.save();
-      ctx.font = `bold ${tool === 'text' ? 18 : 36}px sans-serif`;
-      ctx.fillStyle = tool === 'tick' ? '#22c55e' : tool === 'cross' ? '#ef4444' : color;
-      ctx.fillText(tool === 'tick' ? '✓' : tool === 'cross' ? '✗' : '...', pos.x - 15, pos.y + 15);
-      ctx.restore();
-      onAnnotationsChange([{ snapshot: canvas.toDataURL() }]);
+      const newAnn: Annotation = {
+        page_number: pageNumber,
+        tool_type: tool,
+        x_position: pos.x,
+        y_position: pos.y,
+        color: tool === 'tick' ? '#22c55e' : tool === 'cross' ? '#ef4444' : color,
+        stroke_width: lineWidth,
+        text_content: tool === 'text' ? prompt('Enter comment:') || 'Text' : undefined
+      };
+      onAnnotationsChange([...annotations, newAnn]);
       setIsDrawing(false);
       return;
     }
+
+    // Initialize complex tools (pen, circle, etc.)
+    setCurrentAnnotation({
+      page_number: pageNumber,
+      tool_type: tool,
+      x_position: pos.x,
+      y_position: pos.y,
+      color: color,
+      stroke_width: lineWidth,
+      points: (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') ? [pos] : []
+    });
   };
 
   const draw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing || !lastPos.current || !startPos.current) return;
+    if (!isDrawing || !lastPos.current || !startPos.current || !currentAnnotation) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
     const pos = getPos(e, canvas);
 
     if (tool === 'pen' || tool === 'highlighter' || tool === 'eraser') {
-      ctx.beginPath();
-      ctx.moveTo(lastPos.current.x, lastPos.current.y);
-      ctx.lineTo(pos.x, pos.y);
-      ctx.strokeStyle = tool === 'eraser' ? '#ffffff' : tool === 'highlighter' ? `${color}30` : color;
-      ctx.lineWidth = tool === 'eraser' ? 20 : tool === 'highlighter' ? 30 : lineWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.stroke();
-      lastPos.current = pos;
+      setCurrentAnnotation(prev => prev ? {
+        ...prev,
+        points: [...(prev.points || []), pos]
+      } : null);
+    } else if (tool === 'circle') {
+      const radius = Math.sqrt(Math.pow(pos.x - startPos.current.x, 2) + Math.pow(pos.y - startPos.current.y, 2));
+      setCurrentAnnotation(prev => prev ? { ...prev, width: radius } : null);
+    } else if (tool === 'underline') {
+      setCurrentAnnotation(prev => prev ? { 
+        ...prev, 
+        width: pos.x - startPos.current!.x, 
+        height: pos.y - startPos.current!.y 
+      } : null);
     }
+    lastPos.current = pos;
   };
 
   const endDraw = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!isDrawing) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx || !startPos.current) {
-        setIsDrawing(false);
-        return;
-    }
-    const pos = getPos(e, canvas);
-
-    if (tool === 'circle') {
-      const radius = Math.sqrt(Math.pow(pos.x - startPos.current.x, 2) + Math.pow(pos.y - startPos.current.y, 2));
-      ctx.beginPath();
-      ctx.arc(startPos.current.x, startPos.current.y, radius, 0, 2 * Math.PI);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth;
-      ctx.stroke();
-    } else if (tool === 'underline') {
-      ctx.beginPath();
-      ctx.moveTo(startPos.current.x, startPos.current.y);
-      ctx.lineTo(pos.x, pos.y);
-      ctx.strokeStyle = color;
-      ctx.lineWidth = lineWidth * 1.5;
-      ctx.stroke();
-    }
-
+    if (!isDrawing || !currentAnnotation) return;
+    onAnnotationsChange([...annotations, currentAnnotation]);
+    setCurrentAnnotation(null);
     setIsDrawing(false);
     lastPos.current = null;
     startPos.current = null;
-    onAnnotationsChange([{ snapshot: canvas.toDataURL() }]);
   };
 
   const tools: { id: MarkerTool; icon: any; label: string; color?: string }[] = [
@@ -299,48 +401,46 @@ function DigitalMarkingCanvas({ imageUrl, onAnnotationsChange }: { imageUrl: str
       </button>
 
       {/* High-Performance Canvas Surface */}
-      <div className="relative overflow-auto max-h-[75vh] bg-[#0c111d] rounded-[2.5rem] border border-slate-800/50 shadow-inner scrollbar-hide">
+      <div className="relative overflow-auto max-h-[75vh] bg-[#0c111d] rounded-[2.5rem] border border-slate-800/50 shadow-inner scrollbar-hide w-full flex items-start justify-center">
         <div 
-          className="transition-transform duration-300 ease-out origin-top-left"
-          style={{ transform: `scale(${zoom})` }}
+          className="transition-transform duration-300 ease-out origin-top-left relative"
+          style={{ transform: `scale(${zoom})`, width: imgSize.w, height: imgSize.h }}
         >
-          <div className="relative flex justify-center min-h-[500px]">
-            {pdfGenerating ? (
-              <div className="flex flex-col items-center justify-center h-full space-y-4 text-indigo-400">
-                <Loader2 className="w-12 h-12 animate-spin" />
-                <p className="text-xs font-bold uppercase tracking-widest">Rendering PDF...</p>
-              </div>
-            ) : (
-              <>
-                <img 
-                  ref={imageRef}
-                  src={finalImageUrl} 
-                  alt="Submission" 
-                  className="max-w-none pointer-events-none select-none" 
-                  style={{ display: 'block' }} 
-                  onLoad={(e) => {
-                    setImgSize({
-                      w: e.currentTarget.naturalWidth,
-                      h: e.currentTarget.naturalHeight
-                    });
-                  }}
-                />
-                <canvas
-                  ref={canvasRef}
-                  width={imgSize.w}
-                  height={imgSize.h}
-                  className="absolute inset-0 cursor-crosshair touch-none"
-                  onMouseDown={startDraw}
-                  onMouseMove={draw}
-                  onMouseUp={endDraw}
-                  onMouseLeave={endDraw}
-                  onTouchStart={startDraw}
-                  onTouchMove={draw}
-                  onTouchEnd={endDraw}
-                />
-              </>
-            )}
-          </div>
+          {pdfGenerating ? (
+            <div className="flex flex-col items-center justify-center h-full min-h-[500px] w-full space-y-4 text-indigo-400">
+              <Loader2 className="w-12 h-12 animate-spin" />
+              <p className="text-xs font-bold uppercase tracking-widest">Rendering PDF...</p>
+            </div>
+          ) : (
+            <>
+              <img 
+                ref={imageRef}
+                src={finalImageUrl} 
+                alt="Submission" 
+                className="max-w-none pointer-events-none select-none" 
+                style={{ display: 'block' }} 
+                onLoad={(e) => {
+                  setImgSize({
+                    w: e.currentTarget.naturalWidth,
+                    h: e.currentTarget.naturalHeight
+                  });
+                }}
+              />
+              <canvas
+                ref={canvasRef}
+                width={imgSize.w}
+                height={imgSize.h}
+                className="absolute inset-0 cursor-crosshair touch-none z-10"
+                onMouseDown={startDraw}
+                onMouseMove={draw}
+                onMouseUp={endDraw}
+                onMouseLeave={endDraw}
+                onTouchStart={startDraw}
+                onTouchMove={draw}
+                onTouchEnd={endDraw}
+              />
+            </>
+          )}
         </div>
       </div>
       
@@ -375,8 +475,43 @@ function MarkingPanel({
     newWeakness: '',
   });
   const [activeFile, setActiveFile] = useState(0);
-  const [annotations, setAnnotations] = useState<any[]>([]);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
   const [saving, setSaving] = useState(false);
+  const [resolvedUrl, setResolvedUrl] = useState<string | null>(null);
+
+  const currentFile = (submission.submission_files || [])[activeFile];
+
+  useEffect(() => {
+    if (!currentFile) {
+      setResolvedUrl(null);
+      return;
+    }
+
+    async function resolveUrl() {
+      const url = currentFile.file_url;
+      // If it's a Supabase storage URL, try to get a signed URL
+      if (url.includes('enterprise-assignments')) {
+        const match = url.match(/enterprise-assignments\/(.+)$/);
+        if (match && match[1]) {
+          try {
+            const { data } = await supabase.storage
+              .from('enterprise-assignments')
+              .createSignedUrl(match[1], 3600);
+            if (data?.signedUrl) {
+              setResolvedUrl(data.signedUrl);
+              return;
+            }
+          } catch (err) {
+            console.error('Error signing URL:', err);
+          }
+        }
+      }
+      setResolvedUrl(url);
+      console.log('Resolved URL for file:', currentFile.file_name, url.substring(0, 100) + '...');
+    }
+
+    resolveUrl();
+  }, [currentFile]);
 
   useEffect(() => {
     const fb = submission.submission_feedback?.[0];
@@ -389,20 +524,190 @@ function MarkingPanel({
         newWeakness: '',
       });
     }
+
+    async function fetchAnnotations() {
+      const { data, error } = await supabase
+        .from('submission_annotations')
+        .select('*')
+        .eq('submission_id', submission.id);
+      
+      if (data) setAnnotations(data as Annotation[]);
+    }
+    fetchAnnotations();
   }, [submission]);
 
   const files = submission.submission_files || [];
 
+  async function generateAndUploadMarkedScript(): Promise<string | null> {
+    const doc = new jsPDF('p', 'pt', 'a4');
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        if (i > 0) doc.addPage();
+        
+        const file = files[i];
+        // Resolve URL first (might be signed already or we need to sign/fetch)
+        let fileUrl = file.file_url;
+        if (fileUrl.includes('enterprise-assignments')) {
+          const match = fileUrl.match(/enterprise-assignments\/(.+)$/);
+          if (match && match[1]) {
+            const { data } = await supabase.storage.from('enterprise-assignments').createSignedUrl(match[1], 3600);
+            if (data?.signedUrl) fileUrl = data.signedUrl;
+          }
+        }
+
+        // We use a temporary canvas to render the page + annotations for the PDF
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = 1200; // High resolution for PDF
+        const ctx = tempCanvas.getContext('2d');
+        if (!ctx) continue;
+
+        // Helper to draw markings on a context
+        const drawMarkings = (targetCtx: CanvasRenderingContext2D, pNum: number, pageScale: number) => {
+          const fileAnnotations = annotations.filter(a => a.page_number === pNum);
+          targetCtx.save();
+          targetCtx.scale(pageScale, pageScale);
+          fileAnnotations.forEach(ann => {
+            targetCtx.save();
+            targetCtx.lineCap = 'round';
+            targetCtx.lineJoin = 'round';
+            targetCtx.strokeStyle = ann.color;
+            targetCtx.lineWidth = ann.stroke_width;
+
+            if (ann.tool_type === 'pen' || ann.tool_type === 'highlighter' || ann.tool_type === 'eraser') {
+              if (ann.tool_type === 'highlighter') targetCtx.globalAlpha = 0.3;
+              if (ann.tool_type === 'eraser') { targetCtx.strokeStyle = 'white'; targetCtx.lineWidth = 20; }
+              if (ann.points && ann.points.length > 0) {
+                targetCtx.beginPath();
+                targetCtx.moveTo(ann.points[0].x, ann.points[0].y);
+                ann.points.forEach(p => targetCtx.lineTo(p.x, p.y));
+                targetCtx.stroke();
+              }
+            } else if (ann.tool_type === 'tick' || ann.tool_type === 'cross' || ann.tool_type === 'text') {
+              targetCtx.font = `bold ${ann.tool_type === 'text' ? 18 : 36}px sans-serif`;
+              targetCtx.fillStyle = ann.color;
+              targetCtx.fillText(ann.tool_type === 'tick' ? '✓' : ann.tool_type === 'cross' ? '✗' : ann.text_content || '...', ann.x_position - 15, ann.y_position + 15);
+            } else if (ann.tool_type === 'circle') {
+              targetCtx.beginPath();
+              targetCtx.arc(ann.x_position, ann.y_position, ann.width || 0, 0, 2 * Math.PI);
+              targetCtx.stroke();
+            } else if (ann.tool_type === 'underline') {
+              targetCtx.beginPath();
+              targetCtx.moveTo(ann.x_position, ann.y_position);
+              targetCtx.lineTo(ann.x_position + (ann.width || 0), ann.y_position + (ann.height || 0));
+              targetCtx.stroke();
+            }
+            targetCtx.restore();
+          });
+          targetCtx.restore();
+        };
+
+        // Load image or PDF page
+        if (fileUrl.toLowerCase().split('?')[0].match(/\.(pdf)$/) || fileUrl.toLowerCase().includes('pdf')) {
+          try {
+            const pdfData = await fetch(fileUrl).then(res => res.arrayBuffer());
+            const loadingTask = pdfjsLib.getDocument({ data: pdfData });
+            const pdf = await loadingTask.promise;
+            
+            for (let pNum = 1; pNum <= pdf.numPages; pNum++) {
+              if (i > 0 || pNum > 1) doc.addPage();
+              const page = await pdf.getPage(pNum);
+              // Use higher scale for better PDF quality
+              const viewport = page.getViewport({ scale: 2.0 });
+              
+              const pCanvas = document.createElement('canvas');
+              pCanvas.height = viewport.height;
+              pCanvas.width = viewport.width;
+              const pCtx = pCanvas.getContext('2d');
+              if (pCtx) {
+                await page.render({ canvasContext: pCtx, canvas: pCanvas, viewport }).promise;
+                
+                // DRAW ANNOTATIONS ON PDF PAGE
+                // Note: Currently we assume 1 submission_file = 1 page in the marking UI
+                // If a PDF has multiple pages, the annotations.page_number might need adjustment
+                // For now, we use the global page index i+1
+                drawMarkings(pCtx, i + 1, viewport.scale);
+
+                const imgData = pCanvas.toDataURL('image/jpeg', 0.85);
+                const imgRatio = pCanvas.height / pCanvas.width;
+                doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageWidth * imgRatio);
+              }
+            }
+            continue; 
+          } catch (pdfErr) {
+            console.error('PDF Page Render Error:', pdfErr);
+          }
+        }
+
+        const img = new window.Image();
+        img.crossOrigin = 'anonymous';
+        await new Promise((resolve, reject) => {
+          img.onload = resolve;
+          img.onerror = reject;
+          img.src = fileUrl;
+        });
+
+        const scale = tempCanvas.width / img.naturalWidth;
+        tempCanvas.height = img.naturalHeight * scale;
+        ctx.fillStyle = 'white';
+        ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+        ctx.drawImage(img, 0, 0, tempCanvas.width, tempCanvas.height);
+
+        // DRAW ANNOTATIONS ON IMAGE
+        drawMarkings(ctx, i + 1, scale);
+
+        // Add to jspdf
+        const imgData = tempCanvas.toDataURL('image/jpeg', 0.85);
+        const imgRatio = tempCanvas.height / tempCanvas.width;
+        doc.addImage(imgData, 'JPEG', 0, 0, pageWidth, pageWidth * imgRatio);
+      }
+
+      const pdfBlob = doc.output('blob');
+      const filePath = `marked_submissions/${assignment.id}/${submission.student_id}/marked_script_${Date.now()}.pdf`;
+      
+      const { data, error } = await supabase.storage
+        .from('enterprise-assignments')
+        .upload(filePath, pdfBlob, { contentType: 'application/pdf', upsert: true });
+
+      if (error) throw error;
+      
+      const { data: { publicUrl } } = supabase.storage
+        .from('enterprise-assignments')
+        .getPublicUrl(filePath);
+        
+      return publicUrl;
+    } catch (err) {
+      console.error('PDF Generation Failure:', err);
+      return null;
+    }
+  }
+
   async function saveMarking(returnToStudent: boolean) {
     setSaving(true);
     try {
-      // Save annotations
-      if (annotations.length > 0) {
-        await supabase.from('submission_annotations')
-          .upsert({ submission_id: submission.id, annotation_data: annotations, updated_at: new Date().toISOString() }, { onConflict: 'submission_id' });
+      // 1. Generate marked PDF if returning
+      let markedFileUrl = null;
+      if (returnToStudent) {
+        toast.info('Generating permanent marked PDF...');
+        markedFileUrl = await generateAndUploadMarkedScript();
       }
 
-      // Save feedback
+      // 2. Save structured annotations
+      await supabase.from('submission_annotations').delete().eq('submission_id', submission.id);
+      if (annotations.length > 0) {
+        const payload = annotations.map(a => ({
+          ...a,
+          submission_id: submission.id,
+          id: undefined,
+          created_at: undefined,
+          updated_at: undefined
+        }));
+        await supabase.from('submission_annotations').insert(payload);
+      }
+
+      // 3. Save feedback and metadata
       const feedbackPayload = {
         submission_id: submission.id,
         score: marking.score ? parseFloat(marking.score) : null,
@@ -414,11 +719,15 @@ function MarkingPanel({
       await supabase.from('submission_feedback')
         .upsert(feedbackPayload, { onConflict: 'submission_id' });
 
-      // Update submission status
+      // 4. Update submission status and marked_file_url
       const newStatus = returnToStudent ? 'RETURNED' : 'MARKED';
-      await supabase.from('student_submissions').update({ status: newStatus }).eq('id', submission.id);
+      await supabase.from('student_submissions').update({ 
+        status: newStatus,
+        score: marking.score ? parseFloat(marking.score) : null,
+        marked_file_url: markedFileUrl || undefined
+      }).eq('id', submission.id);
 
-      // Notify student if returning
+      // 5. Notify student
       if (returnToStudent) {
         await supabase.from('notifications').insert({
           type: 'info',
@@ -437,8 +746,6 @@ function MarkingPanel({
       setSaving(false);
     }
   }
-
-  const currentFile = files[activeFile];
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-6 duration-700">
@@ -485,11 +792,11 @@ function MarkingPanel({
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 xl:grid-cols-[1fr_420px] gap-8">
+      <div className="w-full max-w-[1400px] grid md:grid-cols-2 xl:grid-cols-[1fr_420px] gap-8 px-4 sm:px-0">
         {/* Cinematic File Viewer */}
-        <div className="space-y-6 md:min-w-[400px]">
+        <div className="space-y-6 w-full min-w-0">
           {files.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none">
+            <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-none snap-x">
               {files.map((f, i) => (
                 <button
                   key={f.id}
@@ -510,12 +817,44 @@ function MarkingPanel({
 
           <div className="bg-slate-900/40 backdrop-blur-3xl rounded-[2.5rem] border border-slate-700/30 overflow-hidden shadow-2xl relative min-h-[600px] flex flex-col items-center justify-center p-8">
             {currentFile ? (
-              currentFile.file_name.match(/\.(jpg|jpeg|png|webp|pdf)$/i) ? (
-                <div className="w-full h-full animate-in zoom-in-95 duration-500 overflow-auto">
-                  <DigitalMarkingCanvas
-                    imageUrl={currentFile.file_url}
-                    onAnnotationsChange={setAnnotations}
-                  />
+              currentFile.file_name.match(/\.(jpg|jpeg|png|webp|pdf|doc|docx)$/i) ? (
+                <div className="w-full h-full animate-in zoom-in-95 duration-500 flex flex-col items-center">
+                  {resolvedUrl ? (
+                    currentFile.file_name.match(/\.(doc|docx)$/i) ? (
+                      <div className="flex flex-col items-center justify-center p-12 text-center space-y-6">
+                        <div className="w-20 h-20 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20">
+                          <FileText className="w-10 h-10 text-indigo-400" />
+                        </div>
+                        <div>
+                          <p className="text-xl font-black text-white uppercase tracking-tighter">Word Document Detected</p>
+                          <p className="text-slate-500 text-xs font-bold uppercase tracking-widest mt-2 px-12 leading-relaxed">External format requires manual synchronization or download for annotation.</p>
+                        </div>
+                        <a 
+                          href={resolvedUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-lg transition-all active:scale-95 flex items-center gap-2"
+                        >
+                          <Download className="w-4 h-4" />
+                          Download for Marking
+                        </a>
+                      </div>
+                    ) : (
+                      <div className="w-full h-full overflow-auto scrollbar-thin scrollbar-thumb-slate-700">
+                        <DigitalMarkingCanvas
+                          imageUrl={resolvedUrl}
+                          annotations={annotations}
+                          onAnnotationsChange={setAnnotations}
+                          pageNumber={activeFile + 1}
+                        />
+                      </div>
+                    )
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full space-y-4 text-indigo-400">
+                      <Loader2 className="w-12 h-12 animate-spin" />
+                      <p className="text-xs font-bold uppercase tracking-widest">Authorizing Access...</p>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center space-y-6 max-w-md animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -690,6 +1029,12 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
   const [filter, setFilter] = useState<FilterStatus>('ALL');
   const [search, setSearch] = useState('');
   const [markingSubmission, setMarkingSubmission] = useState<Submission | null>(null);
+  const [isBulkMode, setIsBulkMode] = useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
+  const [bulkMarks, setBulkMarks] = useState<Record<string, string>>({}); // student_id -> score
+  const [bulkSaving, setBulkSaving] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   interface Student { id: string; full_name: string; admission_number?: string }
 
@@ -766,13 +1111,67 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
         .eq('assignment_id', assignment.id)
         .order('submitted_at', { ascending: false });
 
-      if (subs) setSubmissions(subs as Submission[]);
+      if (subs) {
+        setSubmissions(subs as Submission[]);
+        // Initialize bulk marks
+        const marks: Record<string, string> = {};
+        (subs as Submission[]).forEach(s => {
+          marks[s.student_id] = String(s.submission_feedback?.[0]?.score ?? '');
+        });
+        setBulkMarks(marks);
+      }
     } finally {
       setLoading(false);
     }
   }
 
+  async function saveBulkMarks() {
+    setBulkSaving(true);
+    try {
+      const updates = Object.entries(bulkMarks).map(async ([studentId, scoreStr]) => {
+        const score = scoreStr ? parseFloat(scoreStr) : null;
+        const sub = submissionMap.get(studentId);
+        
+        if (sub) {
+          // Update feedback
+          await supabase.from('submission_feedback').upsert({
+            submission_id: sub.id,
+            score: score,
+          }, { onConflict: 'submission_id' });
+
+          // Update submission status
+          await supabase.from('student_submissions').update({
+            status: 'MARKED',
+            score: score
+          }).eq('id', sub.id);
+        }
+      });
+
+      await Promise.all(updates);
+      toast.success('Bulk marks saved successfully!');
+      fetchData();
+      setIsBulkMode(false);
+    } catch (err: any) {
+      toast.error(err.message || 'Failed to save bulk marks');
+    } finally {
+      setBulkSaving(false);
+    }
+  }
+
   if (markingSubmission) {
+    if (assignment.type === 'ONLINE_WORKSHEET') {
+      return (
+        <PremiumWorksheetMarking 
+          submissionId={markingSubmission.id}
+          onClose={() => setMarkingSubmission(null)}
+          onReturn={() => {
+            setMarkingSubmission(null);
+            fetchData();
+          }}
+        />
+      );
+    }
+
     return (
       <MarkingPanel
         submission={markingSubmission}
@@ -783,10 +1182,19 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
     );
   }
 
+  if (showAnalytics) {
+    return (
+      <AssignmentAnalyticsDashboard 
+        assignmentId={assignment.id}
+        onBack={() => setShowAnalytics(false)}
+      />
+    );
+  }
+
   const submissionMap = new Map(submissions.map(s => [s.student_id, s]));
   const dueDate = new Date(assignment.due_date);
 
-  const rows = allStudents
+  const filteredRows = allStudents
     .map(student => {
       const sub = submissionMap.get(student.id);
       const isLate = sub ? new Date(sub.submitted_at) > dueDate : false;
@@ -800,6 +1208,9 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
       return true;
     });
 
+  const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
+  const rows = filteredRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   const counts = {
     submitted: submissions.length,
     marked: submissions.filter(s => s.status === 'MARKED' || s.status === 'RETURNED').length,
@@ -807,76 +1218,148 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
   };
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center gap-3">
-        <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
-          <ArrowLeft className="w-4 h-4" />
-          All Assignments
-        </button>
-        <span className="text-slate-700">/</span>
-        <h3 className="text-white font-semibold truncate">{assignment.title}</h3>
+    <div className="fixed inset-0 z-50 bg-slate-950 overflow-y-auto overflow-x-hidden pt-6 pb-20 sm:p-8 flex flex-col items-center">
+      <div className="w-full max-w-[1400px] flex flex-col md:flex-row items-start md:items-center justify-between gap-6 mb-8 px-4 sm:px-0">
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className="flex items-center gap-2 text-slate-400 hover:text-white transition-colors">
+            <ArrowLeft className="w-4 h-4" />
+            All Assignments
+          </button>
+          <span className="text-slate-700">/</span>
+          <h3 className="text-white font-black tracking-tight truncate uppercase">{assignment.title}</h3>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <button
+            onClick={() => setShowAnalytics(true)}
+            className="flex items-center gap-2 px-6 py-3 bg-slate-800/40 border border-slate-700/50 text-slate-400 hover:text-white hover:border-indigo-500/50 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all"
+          >
+            <BarChart2 className="w-4 h-4 text-indigo-400" />
+            Intelligence Reports
+          </button>
+          <button
+            onClick={() => setIsBulkMode(!isBulkMode)}
+            className={cn(
+              "px-6 py-3 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all border",
+              isBulkMode 
+                ? 'bg-amber-500/20 border-amber-500/50 text-amber-400' 
+                : 'bg-slate-800/40 border-slate-700/50 text-slate-400 hover:text-white hover:border-slate-500'
+            )}
+          >
+            {isBulkMode ? 'Disable Bulk Mode' : 'Enable Bulk Mode'}
+          </button>
+          
+          {isBulkMode && (
+            <button
+              onClick={saveBulkMarks}
+              disabled={bulkSaving}
+              className="px-8 py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-[0_20px_40px_rgba(79,70,229,0.3)] border border-indigo-400/20 active:scale-95 disabled:opacity-50 transition-all"
+            >
+              {bulkSaving ? 'Saving...' : 'Finalize Bulk Evaluation'}
+            </button>
+          )}
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-4">
+      {/* Stats - Responsive Grid */}
+      <div className="w-full max-w-[1400px] grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 px-4 sm:px-0">
         {[
-          { label: 'Submitted', value: counts.submitted, total: counts.total, color: 'indigo' },
-          { label: 'Marked', value: counts.marked, total: counts.submitted, color: 'amber' },
-          { label: 'Pending Mark', value: counts.submitted - counts.marked, total: counts.submitted, color: 'red' },
-        ].map(({ label, value, total, color }) => (
-          <div key={label} className={`bg-${color}-500/10 border border-${color}-500/20 rounded-xl p-4`}>
-            <p className="text-slate-400 text-xs">{label}</p>
-            <p className={`text-2xl font-bold text-${color}-400`}>{value}<span className="text-sm text-slate-500 font-normal">/{total}</span></p>
+          { label: 'Transmission Rate', value: counts.submitted, total: counts.total, color: 'indigo', icon: Send },
+          { label: 'Evaluation Quota', value: counts.marked, total: counts.submitted, color: 'emerald', icon: CheckCircle2 },
+          { label: 'Pending Analysis', value: counts.submitted - counts.marked, total: counts.submitted, color: 'amber', icon: AlertCircle },
+        ].map(({ label, value, total, color, icon: Icon }) => (
+          <div key={label} className={cn(
+            "relative overflow-hidden group bg-slate-900/40 backdrop-blur-3xl border border-slate-700/30 p-6 rounded-[2rem] shadow-2xl transition-all duration-500 hover:bg-slate-800/60"
+          )}>
+            <div className={`absolute -top-2 -right-2 p-6 opacity-5 group-hover:opacity-10 transition-opacity`}>
+              <Icon className="w-12 h-12" />
+            </div>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em] mb-2">{label}</p>
+            <div className="flex items-baseline gap-2">
+              <p className={cn("text-3xl font-black", `text-${color}-400`)}>{value}</p>
+              <p className="text-slate-500 text-xs font-bold">/ {total} UNITS</p>
+            </div>
+            <div className="mt-4 w-full bg-slate-950 h-1.5 rounded-full overflow-hidden border border-white/5">
+              <div 
+                className={cn("h-full rounded-full transition-all duration-1000 ease-out", `bg-${color}-500`)} 
+                style={{ width: `${total > 0 ? (value / total) * 100 : 0}%` }} 
+              />
+            </div>
           </div>
         ))}
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+      {/* Filters Area */}
+      <div className="w-full max-w-[1400px] flex flex-col lg:flex-row gap-4 mb-8 px-4 sm:px-0">
+        <div className="relative flex-1 group">
+          <div className="absolute inset-y-0 left-4 flex items-center pointer-events-none">
+            <Search className="w-5 h-5 text-slate-500 group-focus-within:text-indigo-400 transition-colors" />
+          </div>
           <input
             value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search students..."
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+            onChange={e => { setSearch(e.target.value); setCurrentPage(1); }}
+            placeholder="FILTER BY COHORT IDENTITY..."
+            className="w-full bg-slate-900/60 border border-slate-700/50 rounded-[1.5rem] pl-12 pr-6 py-4 text-white focus:outline-none focus:ring-4 focus:ring-indigo-500/10 placeholder:text-slate-700 font-bold text-xs tracking-widest uppercase transition-all"
           />
         </div>
-        <div className="flex gap-1.5 flex-wrap">
-          {(['ALL', 'SUBMITTED', 'MARKED', 'NOT_SUBMITTED', 'LATE'] as FilterStatus[]).map(f => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn("px-3 py-2 rounded-xl text-xs font-medium transition-colors", filter === f ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-white border border-slate-700')}
-            >
-              {f.replace('_', ' ')}
-            </button>
-          ))}
+        <div className="overflow-x-auto pb-2 lg:pb-0 scrollbar-hide">
+          <div className="flex gap-2 min-w-max">
+            {(['ALL', 'SUBMITTED', 'MARKED', 'NOT_SUBMITTED', 'LATE'] as FilterStatus[]).map(f => (
+              <button
+                key={f}
+                onClick={() => { setFilter(f); setCurrentPage(1); }}
+                className={cn(
+                  "px-6 py-4 rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] transition-all border whitespace-nowrap",
+                  filter === f 
+                    ? 'bg-indigo-600 border-indigo-400 text-white shadow-lg' 
+                    : 'bg-slate-900/60 border-slate-700/50 text-slate-500 hover:text-white hover:border-slate-500'
+                )}
+              >
+                {f.replace('_', ' ')}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
-      {/* Billion-Dollar Submissions Table */}
+      {/* Billion-Dollar Responsive Container */}
       {loading ? (
-        <div className="flex justify-center py-24"><Loader2 className="w-12 h-12 text-indigo-400 animate-spin" /></div>
+        <div className="flex flex-col items-center justify-center py-24 space-y-4">
+          <div className="relative">
+            <div className="w-16 h-16 border-4 border-indigo-500/20 border-t-indigo-500 rounded-full animate-spin" />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="w-8 h-8 bg-indigo-500/20 rounded-full animate-pulse" />
+            </div>
+          </div>
+          <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.4em]">Optimizing Stream...</p>
+        </div>
       ) : (
-        <div className="bg-slate-900/40 backdrop-blur-3xl rounded-[2.5rem] border border-slate-700/30 overflow-hidden shadow-2xl">
-          <div className="overflow-x-auto">
+        <div className="w-full max-w-[1400px] px-4 sm:px-0">
+          {/* Desktop Table: Hidden on Mobile */}
+          <div className="hidden lg:block bg-slate-900/40 backdrop-blur-3xl rounded-[2.5rem] border border-slate-700/30 overflow-hidden shadow-2xl overflow-x-auto">
             <table className="w-full text-left border-collapse">
               <thead>
                 <tr className="border-b border-slate-700/30 bg-slate-800/30">
-                  {['Student', 'Vitals', 'Submission Metrics', 'Evaluation', 'Command'].map(h => (
-                    <th key={h} className="px-8 py-5 text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{h}</th>
+                  {['Student Identity', 'Mission Status', 'Timeline', 'Grade Matrix', 'Actions'].map(h => (
+                    <th key={h} className="px-8 py-6 text-[10px] font-black text-slate-500 uppercase tracking-[0.3em]">{h}</th>
                   ))}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-700/20">
+              <tbody className="divide-y divide-slate-700/10">
                 {rows.map(({ student, sub, isLate, isMarked, displayStatus }) => {
                   const fb = sub?.submission_feedback?.[0];
                   return (
-                    <tr key={student.id} className="group hover:bg-slate-800/40 transition-all duration-300">
+                    <tr key={student.id} className="group hover:bg-slate-800/40 transition-all duration-500">
                       <td className="px-8 py-6">
-                        <p className="text-white font-black tracking-tight text-lg group-hover:text-indigo-400 transition-colors uppercase">{student.full_name}</p>
-                        <p className="text-slate-500 text-[10px] font-bold tracking-widest uppercase mt-1">Admission: {student.admission_number || 'N/A'}</p>
+                        <div className="flex items-center gap-4">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 font-black text-lg">
+                            {student.full_name.charAt(0)}
+                          </div>
+                          <div>
+                            <p className="text-white font-black tracking-tight text-xl group-hover:text-indigo-400 transition-colors uppercase">{student.full_name}</p>
+                            <p className="text-slate-500 text-[10px] font-bold tracking-[0.2em] uppercase mt-1 opacity-60">ID: {student.admission_number || 'UNKNOWN'}</p>
+                          </div>
+                        </div>
                       </td>
                       <td className="px-8 py-6">
                         <div className={cn(
@@ -886,69 +1369,200 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
                           displayStatus === 'MARKED' || displayStatus === 'RETURNED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
                           'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
                         )}>
-                          <span className={cn("w-2 h-2 rounded-full animate-pulse", 
+                          <div className={cn("w-2 h-2 rounded-full", 
                             displayStatus === 'NOT_SUBMITTED' ? 'bg-slate-600' :
-                            displayStatus === 'LATE' ? 'bg-rose-400' :
-                            isMarked ? 'bg-emerald-400' : 'bg-indigo-400'
+                            displayStatus === 'LATE' ? 'bg-rose-400 animate-pulse' :
+                            isMarked ? 'bg-emerald-400' : 'bg-indigo-400 animate-pulse'
                           )} />
                           {displayStatus.replace('_', ' ')}
                         </div>
                       </td>
-                      <td className="px-8 py-6 text-slate-400 font-bold text-xs uppercase tracking-wider">
+                      <td className="px-8 py-6">
                         {sub?.submitted_at ? (
                           <div className="flex flex-col">
-                            <span>{format(new Date(sub.submitted_at), 'MMM d, h:mm a')}</span>
-                            {isLate && <span className="text-rose-400 text-[9px] mt-1 font-black">LATE SUBMISSION</span>}
+                            <span className="text-slate-300 font-bold text-xs uppercase tracking-wider">{format(new Date(sub.submitted_at), 'MMM d, h:mm a')}</span>
+                            {isLate && <span className="text-rose-400 text-[9px] mt-1 font-black tracking-widest uppercase">Breach of Deadline</span>}
                           </div>
-                        ) : <span className="opacity-30">—</span>}
+                        ) : <span className="text-slate-700 font-black text-[10px] tracking-widest uppercase opacity-30">Awaiting Signal</span>}
                       </td>
                       <td className="px-8 py-6">
-                        {fb?.score != null ? (
+                        {isBulkMode ? (
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20">
-                              <Trophy className="w-5 h-5 text-amber-500" />
+                            <input
+                              type="number"
+                              value={bulkMarks[student.id] || ''}
+                              onChange={e => setBulkMarks(prev => ({ ...prev, [student.id]: e.target.value }))}
+                              placeholder="0"
+                              className="w-20 bg-slate-950 border border-slate-700/50 rounded-xl px-4 py-3 text-white font-black text-center focus:ring-4 focus:ring-indigo-500/20 text-lg transition-all"
+                            />
+                            <span className="text-slate-600 font-black text-[10px]">/ {assignment.total_marks}</span>
+                          </div>
+                        ) : fb?.score != null ? (
+                          <div className="flex items-center gap-4">
+                            <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-amber-500">
+                              <Trophy className="w-5 h-5" />
                             </div>
                             <div>
-                              <p className="text-xl font-black text-white">{fb.score}<span className="text-slate-500 font-normal">/{assignment.total_marks}</span></p>
-                              <p className="text-[9px] font-bold text-slate-500 tracking-tighter">{Math.round((fb.score / assignment.total_marks) * 100)}% SUCCESS RATE</p>
+                              <p className="text-2xl font-black text-white">{fb.score}<span className="text-slate-500 font-normal text-sm ml-1">/ {assignment.total_marks}</span></p>
+                              <div className="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
+                                <div className="bg-amber-500 h-full" style={{ width: `${(fb.score / assignment.total_marks) * 100}%` }} />
+                              </div>
                             </div>
                           </div>
-                        ) : <span className="text-slate-700 font-black">UNGRADED</span>}
+                        ) : <span className="text-slate-700 font-black text-[10px] tracking-widest uppercase opacity-40">Unverified</span>}
                       </td>
                       <td className="px-8 py-6 text-right">
                         {sub ? (
                           <button
                             onClick={() => setMarkingSubmission(sub)}
-                            className="bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white px-6 py-2.5 rounded-xl text-[10px] font-black uppercase tracking-widest border border-slate-700 hover:border-slate-500 transition-all active:scale-95 flex items-center gap-3 ml-auto"
+                            className="inline-flex items-center gap-3 px-6 py-3 bg-slate-800/80 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-[1.25rem] text-[10px] font-black uppercase tracking-widest border border-slate-700/50 hover:border-indigo-400 transition-all duration-300 active:scale-95 group/btn shadow-lg"
                           >
-                            <Eye className="w-4 h-4" />
-                            {isMarked ? 'Review Profile' : 'Evaluate Work'}
+                            <Eye className="w-4 h-4 group-hover/btn:scale-110 transition-transform" />
+                            {isMarked ? 'Inspect Result' : 'Start Evaluation'}
                           </button>
                         ) : (
-                          <div className="flex items-center gap-2 justify-end text-slate-700">
-                             <span className="text-[10px] font-black uppercase tracking-widest">Awaiting File</span>
+                          <div className="flex items-center gap-3 justify-end text-slate-700">
+                             <span className="text-[10px] font-black uppercase tracking-[0.2em] opacity-30">Null Reference</span>
                           </div>
                         )}
                       </td>
                     </tr>
                   );
                 })}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-8 py-24 text-center">
-                      <div className="group inline-block p-12 bg-slate-800/30 rounded-[3rem] border border-slate-700/30 backdrop-blur-xl">
-                        <Users className="w-16 h-16 text-slate-600 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500" />
-                        <p className="text-slate-400 font-black uppercase tracking-[0.3em] text-xs">Zero Recipients Detected</p>
-                        <p className="text-slate-600 text-[10px] mt-2 font-bold uppercase tracking-widest">Verify Class Population in the Creator</p>
-                      </div>
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
+
+          {/* Mobile Card Layout: Hidden on Large screens */}
+          <div className="lg:hidden space-y-4">
+            {rows.map(({ student, sub, isLate, isMarked, displayStatus }) => {
+              const fb = sub?.submission_feedback?.[0];
+              return (
+                <div key={student.id} className="bg-slate-900/60 backdrop-blur-3xl border border-slate-700/30 p-6 rounded-[2rem] shadow-2xl relative overflow-hidden group">
+                  <div className="flex items-start justify-between gap-4 mb-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 font-black text-lg">
+                        {student.full_name.charAt(0)}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-white font-black tracking-tight text-lg uppercase truncate leading-tight">{student.full_name}</p>
+                        <p className="text-slate-500 text-[9px] font-bold tracking-widest uppercase mt-1">ID: {student.admission_number || 'N/A'}</p>
+                      </div>
+                    </div>
+                    <div className={cn(
+                      "shrink-0 px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase border",
+                      displayStatus === 'NOT_SUBMITTED' ? 'bg-slate-800/50 text-slate-500 border-slate-700/50' :
+                      displayStatus === 'LATE' ? 'bg-rose-500/10 text-rose-400 border-rose-500/20' :
+                      isMarked ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' :
+                      'bg-indigo-500/10 text-indigo-400 border-indigo-500/20'
+                    )}>
+                      {displayStatus.replace('_', ' ')}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-4 mb-6 pt-6 border-t border-slate-800/50">
+                    <div>
+                      <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-1.5 opacity-60">Timeline</p>
+                      {sub?.submitted_at ? (
+                        <p className="text-slate-300 font-bold text-[11px] uppercase">{format(new Date(sub.submitted_at), 'MMM d, h:mm a')}</p>
+                      ) : <p className="text-slate-700 font-black text-[9px] uppercase">PENDING</p>}
+                    </div>
+                    <div>
+                      <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-1.5 opacity-60">Evaluation</p>
+                      {isBulkMode ? (
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="number"
+                            value={bulkMarks[student.id] || ''}
+                            onChange={e => setBulkMarks(prev => ({ ...prev, [student.id]: e.target.value }))}
+                            className="w-16 bg-slate-950 border border-slate-700/50 rounded-lg px-2 py-1.5 text-white font-black text-center text-sm focus:ring-2 focus:ring-indigo-500"
+                          />
+                          <span className="text-slate-600 text-[9px] font-black">/ {assignment.total_marks}</span>
+                        </div>
+                      ) : fb?.score != null ? (
+                        <p className="text-white font-black text-lg">{fb.score}<span className="text-slate-500 text-xs font-normal">/{assignment.total_marks}</span></p>
+                      ) : <p className="text-slate-700 font-black text-[9px] uppercase">UNGRADED</p>}
+                    </div>
+                  </div>
+
+                  {sub ? (
+                    <button
+                      onClick={() => setMarkingSubmission(sub)}
+                      className="w-full py-4 bg-slate-800/80 hover:bg-indigo-600 text-slate-400 hover:text-white rounded-2xl text-[10px] font-black uppercase tracking-widest border border-slate-700/50 hover:border-indigo-400 transition-all duration-300 active:scale-95 flex items-center justify-center gap-3"
+                    >
+                      <Eye className="w-4 h-4" />
+                      {isMarked ? 'INSPECT DATA' : 'START ANALYSIS'}
+                    </button>
+                  ) : (
+                    <div className="w-full py-4 bg-slate-800/20 text-slate-700 rounded-2xl text-[10px] font-black uppercase tracking-widest border border-slate-700/20 flex items-center justify-center gap-3 grayscale">
+                       <CloudOff className="w-4 h-4" />
+                       AWAITING UPLOAD
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Luxury Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-6 bg-slate-900/40 backdrop-blur-3xl p-6 rounded-[2rem] border border-slate-700/30">
+              <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">
+                Displaying <span className="text-white">{rows.length}</span> of <span className="text-white">{filteredRows.length}</span> Identified Assets
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  disabled={currentPage === 1}
+                  onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800/80 text-white rounded-xl border border-slate-700/50 transition-all active:scale-90"
+                >
+                  <ChevronLeft className="w-5 h-5" />
+                </button>
+                <div className="flex items-center gap-1.5">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={cn(
+                        "w-10 h-10 rounded-xl text-[10px] font-black transition-all active:scale-90",
+                        currentPage === page 
+                          ? 'bg-indigo-600 text-white shadow-lg' 
+                          : 'bg-slate-800 text-slate-500 hover:text-white border border-slate-700/50'
+                      )}
+                    >
+                      {page}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  disabled={currentPage === totalPages}
+                  onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                  className="p-3 bg-slate-800/80 hover:bg-slate-700 disabled:opacity-30 disabled:hover:bg-slate-800/80 text-white rounded-xl border border-slate-700/50 transition-all active:scale-90"
+                >
+                  <ChevronRight className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {filteredRows.length === 0 && (
+            <div className="text-center py-24 bg-slate-900/40 backdrop-blur-3xl rounded-[3rem] border border-slate-700/30 shadow-2xl">
+              <div className="group inline-block p-12 bg-slate-800/10 rounded-[3rem] border border-slate-700/10 backdrop-blur-xl">
+                <Users className="w-16 h-16 text-slate-700 mx-auto mb-6 group-hover:scale-110 transition-transform duration-500" />
+                <p className="text-slate-500 font-black uppercase tracking-[0.3em] text-[10px]">Zero Entities Found</p>
+                <p className="text-slate-700 text-[9px] mt-2 font-bold uppercase tracking-widest">Adjust filters or search parameters</p>
+              </div>
+            </div>
+          )}
         </div>
       )}
+
+      {/* Modern Disclaimer Footer */}
+      <div className="mt-8 text-center px-4">
+        <p className="text-slate-600 text-[9px] font-black uppercase tracking-[0.4em] opacity-40">
+          Peak Performance Management Interface · Version 1.0.4 · Cloud Native Assets
+        </p>
+      </div>
     </div>
   );
 }
@@ -1143,64 +1757,65 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
             return (
               <div
                 key={assignment.id}
-                className="group relative bg-slate-900/40 backdrop-blur-3xl border border-slate-700/30 rounded-[2.5rem] p-8 hover:bg-slate-800/60 hover:border-indigo-500/30 transition-all duration-500 cursor-pointer shadow-2xl overflow-hidden"
+                className="group relative bg-slate-900/40 backdrop-blur-3xl border border-slate-700/30 rounded-[2.5rem] p-6 sm:p-8 hover:bg-slate-800/60 hover:border-indigo-500/30 transition-all duration-500 cursor-pointer shadow-2xl overflow-hidden"
                 onClick={() => setViewingAssignment(assignment)}
               >
-                {/* Status Indicator */}
-                <div className="absolute top-0 right-0 p-8">
-                   <div className={cn(
-                        "inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-[10px] font-black tracking-widest uppercase border",
-                        assignment.status === 'PUBLISHED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.1)]' : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
-                      )}>
-                        <span className={cn("w-1.5 h-1.5 rounded-full", assignment.status === 'PUBLISHED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600')} />
-                        {assignment.status}
-                      </div>
-                </div>
-
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 text-xs font-black">
+                    {/* Header Row: Icons + Status */}
+                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-5">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 text-xs font-black shrink-0">
                         {assignment.subjects?.name?.charAt(0)}
                       </div>
-                      <span className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em]">{assignment.submission_type} Asset</span>
-                      {isOver && assignment.status === 'PUBLISHED' && (
-                        <span className="px-3 py-1 bg-amber-500/10 text-amber-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-amber-500/20">Status: Terminal</span>
-                      )}
+                      <div className="flex flex-wrap items-center gap-2">
+                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">{assignment.submission_type}</span>
+                         
+                         <div className={cn(
+                           "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase border transition-all whitespace-nowrap",
+                           assignment.status === 'PUBLISHED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
+                         )}>
+                           <span className={cn("w-1 h-1 rounded-full", assignment.status === 'PUBLISHED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600')} />
+                           {assignment.status}
+                         </div>
+
+                         {isOver && assignment.status === 'PUBLISHED' && (
+                           <span className="px-3 py-1 bg-amber-500/10 text-amber-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-amber-500/20 whitespace-nowrap">Terminal</span>
+                         )}
+                      </div>
                     </div>
                     
-                    <h3 className="text-3xl font-black text-white tracking-tighter group-hover:text-indigo-400 transition-all duration-300 uppercase">{assignment.title}</h3>
+                    <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tighter group-hover:text-indigo-400 transition-all duration-300 uppercase leading-none">{assignment.title}</h3>
                     
-                    <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-6">
-                      <div className="flex items-center gap-2">
-                        <Users className="w-4 h-4 text-slate-500" />
-                        <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider">{assignment.classes?.name} Cohort</span>
+                    <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mt-8">
+                      <div className="flex items-center gap-2.5">
+                        <Users className="w-4 h-4 text-slate-600" />
+                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.classes?.name}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <BookOpen className="w-4 h-4 text-slate-500" />
-                        <span className="text-slate-400 text-[11px] font-bold uppercase tracking-wider">{assignment.subjects?.name}</span>
+                      <div className="flex items-center gap-2.5">
+                        <BookOpen className="w-4 h-4 text-slate-600" />
+                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.subjects?.name}</span>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <Clock className={cn("w-4 h-4", isOver ? 'text-rose-400' : 'text-slate-500')} />
-                        <span className={cn("text-[11px] font-black uppercase tracking-widest", isOver ? 'text-rose-400' : 'text-slate-400')}>
-                          {isOver ? 'EXPIRED' : 'DUE'} • {format(new Date(assignment.due_date), 'MMM d, yyyy')}
+                      <div className="flex items-center gap-2.5">
+                        <Clock className={cn("w-4 h-4", isOver ? 'text-rose-500' : 'text-slate-600')} />
+                        <span className={cn("text-[10px] font-black uppercase tracking-widest", isOver ? 'text-rose-500' : 'text-slate-400')}>
+                          {isOver ? 'Terminal' : 'Due'} • {format(new Date(assignment.due_date), 'MMM d')}
                         </span>
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-12 shrink-0 bg-slate-800/30 p-8 rounded-[2rem] border border-slate-700/20 group-hover:bg-slate-800/50 transition-all duration-500">
+                  <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-12 shrink-0 bg-slate-800/30 p-6 sm:p-8 rounded-[2rem] border border-slate-700/20 group-hover:bg-slate-800/50 transition-all duration-500">
                     <div className="text-center">
-                      <p className="text-4xl font-black text-indigo-400 tracking-tighter">{assignment._submissionCount || 0}</p>
-                      <p className="text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Transmitted</p>
+                      <p className="text-3xl sm:text-4xl font-black text-indigo-400 tracking-tighter">{assignment._submissionCount || 0}</p>
+                      <p className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Transmitted</p>
                     </div>
                     
-                    <div className="h-12 w-px bg-slate-700/50" />
+                    <div className="h-10 sm:h-12 w-px bg-slate-700/50" />
 
                     {(assignment._totalRecipients || 0) > 0 ? (
-                      <div className="flex items-center gap-4">
-                        <div className="relative w-16 h-16">
-                          <svg className="w-16 h-16 -rotate-90 drop-shadow-lg" viewBox="0 0 36 36">
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div className="relative w-12 h-12 sm:w-16 sm:h-16">
+                          <svg className="w-full h-full -rotate-90 drop-shadow-lg" viewBox="0 0 36 36">
                             <circle cx="18" cy="18" r="15.91" fill="none" stroke="currentColor" className="text-slate-900" strokeWidth="4" />
                             <circle
                               cx="18" cy="18" r="15.91" fill="none"
@@ -1211,24 +1826,27 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
                               className="transition-all duration-1000 ease-out"
                             />
                           </svg>
-                          <span className="absolute inset-0 flex items-center justify-center text-[10px] font-black text-white">{subRate}%</span>
+                          <span className="absolute inset-0 flex items-center justify-center text-[8px] sm:text-[10px] font-black text-white">{subRate}%</span>
                         </div>
-                        <div className="text-left">
+                        <div className="text-left hidden sm:block">
                           <p className="text-white text-sm font-black tracking-tight">{assignment._totalRecipients} TOTAL</p>
                           <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Roster Quota</p>
+                        </div>
+                        <div className="text-left sm:hidden">
+                            <p className="text-white text-xs font-black">{assignment._totalRecipients} UNIT</p>
                         </div>
                       </div>
                     ) : (
                       <div className="text-center">
-                         <div className="w-12 h-12 rounded-full bg-slate-900/50 flex items-center justify-center border border-slate-700/30">
-                            <AlertCircle className="w-5 h-5 text-slate-600" />
+                         <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-900/50 flex items-center justify-center border border-slate-700/30">
+                            <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
                          </div>
-                         <p className="text-[9px] text-slate-600 font-black uppercase tracking-widest mt-2">Zero Roster</p>
+                         <p className="text-[8px] sm:text-[9px] text-slate-600 font-black uppercase tracking-widest mt-2">Zero Roster</p>
                       </div>
                     )}
                     
-                    <div className="w-12 h-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500 text-indigo-400">
-                      <Eye className="w-5 h-5" />
+                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500 text-indigo-400">
+                      <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
                     </div>
                   </div>
                 </div>
