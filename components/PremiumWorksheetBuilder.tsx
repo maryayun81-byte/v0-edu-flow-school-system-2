@@ -357,7 +357,7 @@ export default function PremiumWorksheetBuilder({
   }
 
   return (
-    <div className="flex h-full bg-[#0a0c10] overflow-hidden relative">
+    <div className="fixed inset-0 bg-[#0a0c10] overflow-hidden z-[200] flex">
       {/* ── MOBILE OVERLAY ── */}
       {isSidebarOpen && (
         <div 
@@ -434,19 +434,19 @@ export default function PremiumWorksheetBuilder({
       {/* ── MAIN AREA: PAGE EDITOR ── */}
       <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
         {/* Toolbar */}
-        <div className="h-20 bg-[#0f1117] border-b border-slate-800 px-4 lg:px-8 flex items-center justify-between z-10 shrink-0">
-          <div className="flex items-center gap-3 lg:gap-6 overflow-hidden">
+        <div className="h-auto min-h-[5rem] sm:h-20 bg-[#0f1117] border-b border-slate-800 p-3 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 z-10 shrink-0">
+          <div className="flex items-center gap-3 lg:gap-6 w-full sm:w-auto overflow-hidden">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 text-slate-400 hover:text-white transition-colors shrink-0"
+              className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors shrink-0"
             >
               <Layout className="w-5 h-5" />
             </button>
-            <div className="h-8 w-px bg-slate-800 shrink-0" />
+            <div className="hidden sm:block h-8 w-px bg-slate-800 shrink-0" />
             
             {/* Scrollable Question Types on Mobile */}
             <div className="flex-1 overflow-x-auto no-scrollbar scroll-smooth">
-              <div className="flex items-center gap-2 py-2">
+              <div className="flex items-center gap-2 py-1">
                  {QUESTION_TYPES.map(({ id, label, icon: Icon }) => (
                    <button 
                      key={id}
@@ -461,12 +461,13 @@ export default function PremiumWorksheetBuilder({
             </div>
           </div>
           
-          <div className="flex items-center gap-2 lg:gap-4 shrink-0 pl-2 lg:pl-0">
+          <div className="flex items-center justify-end gap-2 lg:gap-4 w-full sm:w-auto shrink-0">
             <button 
               onClick={onClose}
-              className="px-3 lg:px-4 py-2 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-wider transition-all"
+              className="px-4 py-2 sm:py-2.5 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2"
             >
-              <span className="hidden sm:inline">Close</span>
+              <span className="hidden sm:inline">Close Builder</span>
+              <span className="sm:hidden">Close</span>
               <X className="w-4 h-4 sm:hidden" />
             </button>
             <button 
@@ -474,9 +475,11 @@ export default function PremiumWorksheetBuilder({
                 await saveWorksheet();
                 setShowPreview(true);
               }}
-              className="p-2 lg:p-3 bg-indigo-500 px-4 text-white hover:bg-indigo-600 rounded-xl transition-all shadow-lg shadow-indigo-500/20"
+              className="p-2 sm:px-6 sm:py-2.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
             >
               <Eye className="w-4 h-4 lg:w-5 h-5" />
+              <span className="hidden sm:inline">Preview Student View</span>
+              <span className="sm:hidden">Preview</span>
             </button>
           </div>
         </div>

@@ -215,7 +215,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
           Due {format(new Date(assignment.due_date), 'EEEE, MMMM d, yyyy')} at {format(new Date(assignment.due_date), 'h:mm a')}
           {isOverdue && <span className="text-red-400 font-bold ml-1">— OVERDUE</span>}
         </div>
-        {assignment.type === 'ONLINE_WORKSHEET' && !submission && (
+        {assignment.type === 'ONLINE_AUTO_GRADED' && !submission && (
            <div className="pt-6">
               <button 
                 onClick={() => setShowWorksheetPlayer(true)}
@@ -236,7 +236,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
       </div>
 
       {showWorksheetPlayer && (
-        <div className="fixed inset-0 z-[100] bg-black">
+        <div className="fixed inset-0 z-[100] bg-[#0a0c10] flex flex-col">
           <PremiumWorksheetPlayer 
             assignmentId={assignment.id} 
             studentId={studentId} 
@@ -395,7 +395,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
               )}
 
               {/* Strategic Evaluation Output (Marked Script) */}
-              {assignment.type === 'ONLINE_WORKSHEET' && isReturned && (
+              {assignment.type === 'ONLINE_AUTO_GRADED' && isReturned && (
                 <button
                   onClick={() => setShowWorksheetPlayer(true)}
                   className="w-full flex items-center justify-between p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl hover:bg-indigo-500/20 transition-all group"
@@ -434,7 +434,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                 </div>
               )}
 
-              {submission.status === 'RETURNED' && assignment.type === 'ONLINE_WORKSHEET' && (
+              {submission.status === 'RETURNED' && assignment.type === 'ONLINE_AUTO_GRADED' && (
                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-emerald-500/20 rounded-lg">
@@ -469,7 +469,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
       )}
 
       {/* ── SUBMISSION FORM (not yet submitted) ── */}
-      {canSubmit && assignment.type !== 'ONLINE_WORKSHEET' && (
+      {canSubmit && assignment.type !== 'ONLINE_AUTO_GRADED' && (
         <div className="bg-card border border-border/50 rounded-2xl p-5 space-y-4">
           <h3 className="font-semibold text-foreground">Submit Your Work</h3>
 

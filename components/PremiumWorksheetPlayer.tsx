@@ -140,7 +140,7 @@ export default function PremiumWorksheetPlayer(props: {
             .insert({
               assignment_id: assignmentId,
               student_id: studentId,
-              status: 'IN_PROGRESS',
+              status: 'NOT_SUBMITTED',
               submission_mode: 'ONLINE',
               is_draft: true
             })
@@ -328,38 +328,41 @@ export default function PremiumWorksheetPlayer(props: {
   return (
     <div className="flex flex-col h-full bg-[#0a0c10] text-slate-200">
       {/* ── HEADER ── */}
-      <div className="h-20 bg-[#0f1117] border-b border-slate-800 px-8 flex items-center justify-between z-10">
-        <div className="flex items-center gap-6">
+      <div className="bg-[#0f1117] border-b border-slate-800 p-4 sm:px-8 sm:h-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 z-10">
+        <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto">
           <button 
             onClick={onClose}
-            className="p-2 text-slate-400 hover:text-white transition-colors"
+            className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors shrink-0"
           >
             <ChevronLeft className="w-6 h-6" />
           </button>
-          <div className="h-8 w-px bg-slate-800" />
-          <div>
-             <h1 className="text-sm font-black text-white uppercase tracking-tight">{activePage.header_title}</h1>
+          <div className="hidden sm:block h-8 w-px bg-slate-800" />
+          <div className="min-w-0 flex-1">
+             <h1 className="text-xs sm:text-sm font-black text-white uppercase tracking-tight truncate w-full">{activePage.header_title}</h1>
              <div className="flex items-center gap-2 mt-1">
-                <div className="w-32 h-1 bg-slate-800 rounded-full overflow-hidden">
+                <div className="w-24 sm:w-32 h-1 bg-slate-800 rounded-full overflow-hidden shrink-0">
                    <div className="h-full bg-indigo-500 transition-all duration-500" style={{ width: `${progress}%` }} />
                 </div>
-                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">{Math.round(progress)}% Complete</span>
+                <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest whitespace-nowrap">{Math.round(progress)}% Complete</span>
              </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="hidden sm:flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-[10px] font-bold text-slate-500 uppercase">
-             <Clock className="w-3 h-3" />
-             {lastSaved ? `Synced ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not synced'}
+        <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto">
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-[10px] font-bold text-slate-500 uppercase shrink-0">
+             <Clock className="w-3 h-3 hidden sm:block" />
+             <span className="truncate max-w-[100px] sm:max-w-none">
+                {lastSaved ? `Synced ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not synced'}
+             </span>
           </div>
           <button 
             onClick={submitWorksheet}
             disabled={submitting}
-            className="px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+            className="px-4 sm:px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 shrink-0"
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            {reviewMode ? 'Viewing Graded Work' : 'Submit Work'}
+            <span className="hidden sm:inline">{reviewMode ? 'Viewing Graded Work' : 'Submit Work'}</span>
+            <span className="sm:hidden">{reviewMode ? 'View' : 'Submit'}</span>
           </button>
         </div>
       </div>
@@ -535,15 +538,15 @@ export default function PremiumWorksheetPlayer(props: {
           ))}
 
           {/* Page Footer Navigation */}
-          <div className="flex items-center justify-between pt-12 pb-24 border-t border-slate-900">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-6 pt-12 pb-24 border-t border-slate-900">
              <button 
                disabled={activePageIndex === 0}
                onClick={() => setActivePageIndex(prev => prev - 1)}
-               className="flex items-center gap-2 px-6 py-3 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 disabled:opacity-20 transition-all font-black uppercase tracking-widest text-[10px]"
+               className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 disabled:opacity-20 transition-all font-black uppercase tracking-widest text-[10px]"
              >
                 <ChevronLeft className="w-4 h-4" /> Previous Phase
              </button>
-             <div className="flex items-center gap-1.5">
+             <div className="flex items-center gap-1.5 flex-wrap justify-center">
                 {pages.map((_, i) => (
                   <div 
                     key={i} 
@@ -557,7 +560,7 @@ export default function PremiumWorksheetPlayer(props: {
              <button 
                disabled={activePageIndex === pages.length - 1}
                onClick={() => setActivePageIndex(prev => prev + 1)}
-               className="flex items-center gap-2 px-6 py-3 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 disabled:opacity-20 transition-all font-black uppercase tracking-widest text-[10px]"
+               className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 rounded-xl border border-slate-800 text-slate-400 hover:text-white hover:bg-slate-900 disabled:opacity-20 transition-all font-black uppercase tracking-widest text-[10px]"
              >
                 Next Phase <ChevronRight className="w-4 h-4" />
              </button>
@@ -566,8 +569,8 @@ export default function PremiumWorksheetPlayer(props: {
       </div>
 
       {/* ── FOOTER BAR ── */}
-      <div className="h-12 bg-[#0f1117] border-t border-slate-800 flex items-center justify-center z-10">
-         <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.4em]">
+      <div className="h-12 bg-[#0f1117] border-t border-slate-800 flex items-center justify-center z-10 px-4 text-center truncate">
+         <p className="text-[9px] font-black text-slate-600 uppercase tracking-[0.4em] truncate w-full">
             {activePage.footer_text}
          </p>
       </div>

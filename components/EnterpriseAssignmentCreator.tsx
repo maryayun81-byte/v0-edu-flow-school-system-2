@@ -332,7 +332,7 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
         allow_late_submission: allowLate,
         submission_type: submissionType,
         visibility_type: visibilityType,
-        type: submissionType === 'INTERACTIVE' ? 'ONLINE_WORKSHEET' : 'OFFLINE_DOCUMENT_BASED',
+        type: submissionType === 'INTERACTIVE' ? 'ONLINE_AUTO_GRADED' : 'OFFLINE_DOCUMENT_BASED',
         total_marks: 100,
         status: publishNow ? 'PUBLISHED' : 'DRAFT',
         published_at: publishNow ? new Date().toISOString() : null,
@@ -356,14 +356,15 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
       // 2. Upload files to Supabase Storage and record them
       for (const af of filesToUpload) {
         const ext = af.file.name.split('.').pop();
-        const path = `${assignmentId}/${af.fileType}_${Date.now()}.${ext}`;
+        // Use currentAssignmentId (not stale state) for the path
+        const path = `${currentAssignmentId}/${af.fileType}_${Date.now()}.${ext}`;
         const { error: upErr } = await supabase.storage
           .from('enterprise-assignments')
           .upload(path, af.file);
         if (upErr) { console.warn('File upload failed:', upErr.message); continue; }
         const { data: { publicUrl } } = supabase.storage.from('enterprise-assignments').getPublicUrl(path);
         await supabase.from('assignment_files').insert({
-          assignment_id: assignmentId,
+          assignment_id: currentAssignmentId,  // Fixed: was using stale `assignmentId` state
           file_name: af.file.name,
           file_url: publicUrl,
           file_type: af.fileType,
@@ -384,8 +385,9 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
         }
 
         if (recipientIds.length > 0) {
+          // Fixed: was using stale `assignmentId` state instead of `currentAssignmentId` local variable
           await supabase.from('assignment_recipients').insert(
-            recipientIds.map(sid => ({ assignment_id: assignmentId, student_id: sid }))
+            recipientIds.map(sid => ({ assignment_id: currentAssignmentId, student_id: sid }))
           );
         }
 
@@ -644,7 +646,8 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
                                 subject_id: selectedSubjectId,
                                 due_date: `${dueDate}T${dueTime}:00`,
                                 allow_late_submission: allowLate,
-                                type: 'ONLINE_AUTO_GRADED', // valid enum value
+                                submission_type: 'INTERACTIVE',
+                                type: 'ONLINE_AUTO_GRADED',
                                 total_marks: 100,
                                 status: 'DRAFT',
                               };
