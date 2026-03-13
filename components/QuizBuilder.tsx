@@ -605,14 +605,28 @@ function QuizForm({ userId, initialQuiz, onBack }: { userId: string; initialQuiz
         </div>
       </div>
 
-      {/* Mobile Sticky Add Button (FAB) */}
-      <div className="lg:hidden fixed bottom-6 right-6 z-50 group">
-        <div className="absolute bottom-16 right-0 bg-slate-800 border border-white/10 rounded-xl p-2 shadow-2xl flex-col gap-2 hidden group-hover:flex">
-          <QuestionTools />
+      {/* Mobile Sticky Action Bar (FAB) */}
+      <div className="lg:hidden fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3 pointer-events-none">
+        {/* Actions (always visible on mobile) */}
+        <div className="flex flex-col gap-2 pointer-events-auto items-end">
+          <button onClick={() => handleSave(true)} className="flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-amber-500 to-orange-600 hover:opacity-90 text-white rounded-full font-bold shadow-[0_0_20px_rgba(245,158,11,0.4)] text-sm transition-transform active:scale-95 text-center">
+            Publish Quiz
+          </button>
+          <button onClick={() => handleSave(false)} className="px-6 py-2 bg-slate-800 border border-white/20 text-white rounded-full font-medium shadow-xl text-sm transition-transform active:scale-95 text-center">
+             Save Draft
+          </button>
         </div>
-        <button className="w-14 h-14 bg-amber-500 rounded-full shadow-[0_0_20px_rgba(245,158,11,0.4)] flex items-center justify-center text-white hover:scale-105 transition-transform" title="Add Blocks">
-          <Plus className="w-8 h-8" />
-        </button>
+        
+        {/* Tools Menu */}
+        <div className="group relative mt-2 pointer-events-auto flex justify-end w-full">
+          <div className="absolute bottom-16 right-0 bg-slate-800 border border-white/10 rounded-xl p-2 shadow-2xl flex-col gap-2 hidden group-hover:flex w-[200px]">
+             <div className="text-[10px] text-gray-500 font-bold uppercase tracking-wider mb-1 px-2">Add Questions</div>
+             <QuestionTools />
+          </div>
+          <button className="w-14 h-14 bg-violet-600 rounded-full shadow-[0_0_15px_rgba(124,58,237,0.5)] flex items-center justify-center text-white hover:scale-105 transition-transform" title="Add Blocks">
+            <Plus className="w-8 h-8" />
+          </button>
+        </div>
       </div>
 
     </div>
@@ -682,21 +696,21 @@ const QuestionEditor = memo(function QuestionEditor({
         {question.question_type === 'multiple_choice' && (
           <div className="space-y-2 mt-4">
             {question.options.map((option, optIdx) => (
-              <div key={optIdx} className="flex items-center gap-3 group/opt">
+              <div key={optIdx} className="flex items-start sm:items-center gap-2 sm:gap-3 group/opt w-full">
                 <button
                   onClick={() => onUpdate({ correct_answer: option })}
-                  className={`shrink-0 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center transition-all ${
+                  className={`mt-2 sm:mt-0 shrink-0 w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center transition-all ${
                     question.correct_answer === option && option.trim() ? 'border-emerald-500 bg-emerald-500' : 'border-gray-600 hover:border-gray-500'
                   }`}
                 >
                   {question.correct_answer === option && option.trim() && <CheckCircle2 className="w-3 h-3 md:w-4 md:h-4 text-white" />}
                 </button>
-                <input
-                  type="text"
+                <textarea
                   placeholder={`Option ${optIdx + 1}`}
                   value={option}
+                  rows={1}
                   onChange={e => updateOption(optIdx, e.target.value)}
-                  className={`flex-1 px-3 py-2 bg-white/5 border rounded-lg text-white text-sm outline-none transition-all ${
+                  className={`flex-1 w-full min-h-[40px] px-3 py-2 bg-white/5 border rounded-lg text-white text-sm outline-none transition-all resize-y ${
                     question.correct_answer === option && option.trim() ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-transparent focus:border-white/20'
                   }`}
                 />
