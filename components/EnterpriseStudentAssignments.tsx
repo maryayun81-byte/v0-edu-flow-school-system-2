@@ -236,7 +236,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
       </div>
 
       {showWorksheetPlayer && (
-        <div className="fixed inset-0 z-[100] bg-[#0a0c10] flex flex-col">
+        <div className="fixed inset-0 w-full h-[100dvh] z-[100] bg-[#0a0c10] flex flex-col">
           <PremiumWorksheetPlayer 
             assignmentId={assignment.id} 
             studentId={studentId} 
@@ -315,7 +315,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
           )}
 
           {/* Feedback (when returned) */}
-          {isReturned && feedback && (
+          {isReturned && (
             <div className="space-y-4 pt-4 border-t border-border/50">
               <div className="flex items-center justify-between">
                 <h4 className="font-semibold text-foreground">Teacher Feedback</h4>
@@ -339,13 +339,13 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                 </div>
               </div>
 
-              {feedback.strengths && feedback.strengths.length > 0 && (
+              {((feedback?.strengths || submission.strengths) && (feedback?.strengths || submission.strengths)!.length > 0) && (
                 <div>
                   <p className="text-xs font-semibold text-emerald-400 uppercase tracking-wide mb-2 flex items-center gap-1.5">
                     <TrendingUp className="w-3.5 h-3.5" /> Strengths
                   </p>
                   <div className="space-y-1.5">
-                    {feedback.strengths.map((s, i) => (
+                    {(feedback?.strengths || submission.strengths)!.map((s: string, i: number) => (
                       <div key={i} className="flex items-start gap-2 text-sm">
                         <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
                         <span className="text-foreground">{s}</span>
@@ -395,7 +395,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
               )}
 
               {/* Strategic Evaluation Output (Marked Script) */}
-              {assignment.type === 'ONLINE_AUTO_GRADED' && isReturned && (
+              {(assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'WORKSHEET') && isReturned && (
                 <button
                   onClick={() => setShowWorksheetPlayer(true)}
                   className="w-full flex items-center justify-between p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl hover:bg-indigo-500/20 transition-all group"
@@ -434,7 +434,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                 </div>
               )}
 
-              {submission.status === 'RETURNED' && assignment.type === 'ONLINE_AUTO_GRADED' && (
+              {submission.status === 'RETURNED' && (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'WORKSHEET') && (
                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-emerald-500/20 rounded-lg">

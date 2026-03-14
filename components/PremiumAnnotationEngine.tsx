@@ -26,7 +26,8 @@ export interface Annotation {
 }
 
 interface Props {
-  imageUrl: string;
+  imageUrl?: string;
+  questionContext?: { text: string; answer: string };
   initialAnnotations?: Annotation[];
   onSave: (annotations: Annotation[]) => void;
   readOnly?: boolean;
@@ -34,6 +35,7 @@ interface Props {
 
 export default function PremiumAnnotationEngine({ 
   imageUrl, 
+  questionContext,
   initialAnnotations = [], 
   onSave,
   readOnly = false 
@@ -79,24 +81,61 @@ export default function PremiumAnnotationEngine({
     };
   }, []);
 
-  // Load Background Image
+  // Load Background Image or Question Context
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
-    if (!canvas || !imageUrl) return;
+    if (!canvas) return;
 
-    fabric.Image.fromURL(imageUrl, { crossOrigin: 'anonymous' }).then((img: any) => {
-      canvas.setDimensions({ width: img.width, height: img.height });
-      canvas.backgroundImage = img;
+    if (imageUrl) {
+      fabric.Image.fromURL(imageUrl, { crossOrigin: 'anonymous' }).then((img: any) => {
+        canvas.setDimensions({ width: img.width, height: img.height });
+        canvas.backgroundImage = img;
+        canvas.renderAll();
+        setImageLoaded(true);
+        
+        // Load initial annotations if any
+        if (initialAnnotations.length > 0) {
+          // Here we would convert serializable annotations back to fabric objects
+          // For simplicity in this step, we focus on new creation
+        }
+      }).catch((err: any) => {
+        console.error("Failed to load background image:", err);
+        canvas.setDimensions({ width: 800, height: 1100 });
+        setImageLoaded(true);
+      });
+    } else if (questionContext) {
+      canvas.setDimensions({ width: 800, height: 800 });
+      
+      const qText = new fabric.Textbox("Question:\n" + questionContext.text, {
+        left: 50,
+        top: 50,
+        width: 700,
+        fontSize: 22,
+        fontWeight: 'bold',
+        fill: '#1e293b',
+        selectable: false,
+        evented: false,
+      });
+      canvas.add(qText);
+
+      const aText = new fabric.Textbox("Student's Response:\n" + (questionContext.answer || "No response provided."), {
+        left: 50,
+        top: (qText.top || 50) + qText.getScaledHeight() + 40,
+        width: 700,
+        fontSize: 18,
+        fill: '#334155',
+        selectable: false,
+        evented: false,
+      });
+      canvas.add(aText);
+
       canvas.renderAll();
       setImageLoaded(true);
-      
-      // Load initial annotations if any
-      if (initialAnnotations.length > 0) {
-        // Here we would convert serializable annotations back to fabric objects
-        // For simplicity in this step, we focus on new creation
-      }
-    });
-  }, [imageUrl]);
+    } else {
+      canvas.setDimensions({ width: 800, height: 1100 });
+      setImageLoaded(true);
+    }
+  }, [imageUrl, questionContext]);
 
   // tool effect
   useEffect(() => {

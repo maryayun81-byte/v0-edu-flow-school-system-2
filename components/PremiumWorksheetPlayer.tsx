@@ -86,6 +86,7 @@ export default function PremiumWorksheetPlayer(props: {
   const [markings, setMarkings] = useState<Record<string, any>>({});
   const [viewingAnnotationsId, setViewingAnnotationsId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
+  const [showReviewModal, setShowReviewModal] = useState(false);
 
   useEffect(() => {
     fetchWorksheetAndAnswers();
@@ -356,7 +357,10 @@ export default function PremiumWorksheetPlayer(props: {
              </span>
           </div>
           <button 
-            onClick={submitWorksheet}
+            onClick={() => {
+              if (reviewMode || isPreview) submitWorksheet();
+              else setShowReviewModal(true);
+            }}
             disabled={submitting}
             className="px-4 sm:px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 shrink-0"
           >
@@ -387,11 +391,13 @@ export default function PremiumWorksheetPlayer(props: {
                          {q.order_index + 1}
                       </div>
                       <div>
-                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Question Module</p>
-                         <p className="text-indigo-400 font-bold text-xs">{q.marks} Marks Available</p>
+                         <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{q.question_type === 'content_block' ? 'Reading Passage' : 'Question Module'}</p>
+                         {q.question_type !== 'content_block' && (
+                           <p className="text-indigo-400 font-bold text-xs">{q.marks} Marks Available</p>
+                         )}
                       </div>
                    </div>
-                   {answers[q.id]?.is_answered && (
+                   {answers[q.id]?.is_answered && q.question_type !== 'content_block' && (
                      <div className="w-6 h-6 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-500">
                         <CheckCircle2 className="w-4 h-4" />
                      </div>
@@ -401,7 +407,10 @@ export default function PremiumWorksheetPlayer(props: {
                 <div className="prose prose-invert max-w-none mb-8">
                    <MathContent 
                      content={q.question_text.replace(/\n/g, '<br/>')} 
-                     className="text-lg font-medium text-slate-100 leading-relaxed" 
+                     className={cn(
+                       "text-lg font-medium text-slate-100 leading-relaxed",
+                       q.question_type === 'content_block' ? "font-serif text-slate-300" : ""
+                     )} 
                    />
                 </div>
 
@@ -420,12 +429,12 @@ export default function PremiumWorksheetPlayer(props: {
 
                    {q.question_type === 'paragraph' && (
                      <textarea 
-                       rows={4}
+                       rows={8}
                        disabled={reviewMode}
                        value={answers[q.id]?.answer_text || ''}
                        onChange={(e) => updateAnswer(q.id, { answer_text: e.target.value })}
                        placeholder="Compose your detailed analysis..."
-                       className="w-full bg-[#0a0c10] border border-slate-800 rounded-2xl px-6 py-4 text-slate-200 placeholder:text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all font-medium resize-none disabled:opacity-70"
+                       className="w-full bg-[#0a0c10] border border-slate-800 rounded-2xl px-6 py-4 text-slate-200 placeholder:text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all font-medium resize-y min-h-[120px] disabled:opacity-70"
                      />
                    )}
 
@@ -602,6 +611,60 @@ export default function PremiumWorksheetPlayer(props: {
                 onSave={() => {}}
                 readOnly={true}
               />
+           </div>
+        </div>
+      )}
+
+      {/* ── PRE-SUBMISSION REVIEW MODAL ── */}
+      {showReviewModal && (
+        <div className="fixed inset-0 z-[200] bg-black/95 flex flex-col p-4 sm:p-8 animate-in fade-in duration-300 overflow-y-auto w-full h-[100dvh]">
+           <div className="max-w-2xl w-full mx-auto bg-[#0f1117] border border-slate-800 rounded-3xl p-8 my-auto shadow-2xl mt-[10vh]">
+              <h2 className="text-2xl font-black text-white uppercase tracking-widest mb-2 text-center">Submission Review</h2>
+              <p className="text-slate-400 text-sm text-center mb-8">Please review your worksheet progress before finalizing.</p>
+              
+              <div className="space-y-4 mb-8 max-h-[50vh] overflow-y-auto pr-2 no-scrollbar">
+                 {pages.map((p) => {
+                   const qs = p.questions.filter(q => q.question_type !== 'content_block');
+                   if (qs.length === 0) return null;
+                   
+                   const answeredCount = qs.filter(q => answers[q.id]?.is_answered).length;
+                   const allAnswered = answeredCount === qs.length;
+                   
+                   return (
+                     <div key={p.id} className="p-4 bg-slate-900/50 border border-slate-800 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                           <p className="text-white font-bold text-sm">Page {p.page_number}: {p.header_title}</p>
+                           <p className="text-[10px] text-slate-500 font-bold uppercase mt-1">{answeredCount} of {qs.length} Answered</p>
+                        </div>
+                        {allAnswered ? (
+                           <div className="px-3 py-1.5 bg-emerald-500/10 text-emerald-500 rounded-lg text-[10px] font-black uppercase w-fit self-end sm:self-auto border border-emerald-500/20"><CheckCircle2 className="w-3 h-3 inline mr-1" /> Complete</div>
+                        ) : (
+                           <div className="px-3 py-1.5 bg-amber-500/10 text-amber-500 rounded-lg text-[10px] font-black uppercase w-fit self-end sm:self-auto border border-amber-500/20"><AlertCircle className="w-3 h-3 inline mr-1" /> Partial</div>
+                        )}
+                     </div>
+                   );
+                 })}
+              </div>
+              
+              <div className="flex flex-col sm:flex-row items-center gap-4 pt-6 border-t border-slate-800">
+                 <button 
+                   onClick={() => setShowReviewModal(false)}
+                   className="w-full sm:flex-1 py-4 bg-slate-800 border border-slate-700 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs hover:bg-slate-700 transition-colors"
+                 >
+                    Return to Draft
+                 </button>
+                 <button 
+                   onClick={() => {
+                     setShowReviewModal(false);
+                     submitWorksheet();
+                   }}
+                   disabled={submitting}
+                   className="w-full sm:flex-1 py-4 bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-400 hover:to-purple-500 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs transition-all shadow-lg flex items-center justify-center gap-2"
+                 >
+                    {submitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                    Confirm & Submit
+                 </button>
+              </div>
            </div>
         </div>
       )}

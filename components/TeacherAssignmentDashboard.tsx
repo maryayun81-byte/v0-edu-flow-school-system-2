@@ -1159,7 +1159,7 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
   }
 
   if (markingSubmission) {
-    if (assignment.type === 'ONLINE_WORKSHEET') {
+    if (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE' || assignment.type === 'ONLINE_WORKSHEET') {
       return (
         <PremiumWorksheetMarking 
           submissionId={markingSubmission.id}

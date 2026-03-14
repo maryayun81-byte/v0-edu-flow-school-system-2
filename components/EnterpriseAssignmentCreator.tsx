@@ -688,7 +688,7 @@ export default function EnterpriseAssignmentCreator({ userId, onClose, onSuccess
                   
                   {/* Worksheet Overlay Modal */}
                   {showWorksheetBuilder && assignmentId && (
-                    <div className="fixed inset-0 z-[100] bg-black">
+                    <div className="fixed inset-0 w-full h-[100dvh] z-[100] bg-black">
                       <PremiumWorksheetBuilder 
                         assignmentId={assignmentId} 
                         onClose={() => setShowWorksheetBuilder(false)}

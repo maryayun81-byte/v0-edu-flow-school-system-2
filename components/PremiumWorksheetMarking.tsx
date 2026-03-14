@@ -6,7 +6,7 @@ import {
   ChevronLeft, ChevronRight, Save, Send, 
   CheckCircle2, AlertCircle, Loader2, BookOpen,
   User, Calendar, Trophy, MessageSquare, 
-  Layout, FileText, ChevronDown, Check
+  Layout, FileText, ChevronDown, Check, Star, X
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -111,7 +111,7 @@ export default function PremiumWorksheetMarking({
         .eq('submission_id', submissionId);
       
       const answerMap: Record<string, StudentAnswer> = {};
-      answerData?.forEach(a => { answerMap[a.question_id] = a; });
+      answerData?.forEach((a: any) => { answerMap[a.question_id] = a; });
       setAnswers(answerMap);
 
       // 4. Fetch Existing Markings
@@ -121,7 +121,7 @@ export default function PremiumWorksheetMarking({
         .eq('submission_id', submissionId);
       
       const markingMap: Record<string, QuestionMarking> = {};
-      markingData?.forEach(m => { 
+      markingData?.forEach((m: any) => { 
         markingMap[m.question_id] = {
           ...m,
           annotation_data: Array.isArray(m.annotation_data) ? m.annotation_data : []
@@ -212,7 +212,8 @@ export default function PremiumWorksheetMarking({
   }
 
   const activePage = pages[activePageIndex];
-  const activeQuestions = activePage.questions;
+  const activeQuestions = activePage?.questions || [];
+  const worksheetTotalMarks = pages.reduce((sum, p) => sum + p.questions.reduce((qSum, q) => qSum + (q.marks || 0), 0), 0) || submission?.assignments?.total_marks || 100;
 
   return (
     <div className="flex flex-col h-full bg-[#0a0c10]">
@@ -237,7 +238,7 @@ export default function PremiumWorksheetMarking({
                 <p className="text-[9px] font-black text-slate-500 uppercase">Current Score</p>
                 <p className="text-lg font-black text-emerald-400 leading-tight">
                    {Object.values(markings).reduce((sum, m) => sum + (m.marks_awarded || 0), 0)}
-                   <span className="text-xs text-slate-600 ml-1">/ {submission?.assignments?.total_marks}</span>
+                   <span className="text-xs text-slate-600 ml-1">/ {worksheetTotalMarks}</span>
                 </p>
              </div>
           </div>
@@ -312,89 +313,97 @@ export default function PremiumWorksheetMarking({
                                 <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">{q.question_type} unit</span>
                              </div>
                              <div className="flex items-center gap-4">
-                                <span className="text-[10px] font-black text-slate-600 uppercase">Max Points: {q.marks}</span>
-                                <div className="flex items-center gap-2 bg-slate-900 px-4 py-2 rounded-xl border border-white/5">
-                                   <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                                   <input 
-                                     type="number" 
-                                     value={markings[q.id]?.marks_awarded ?? 0}
-                                     max={q.marks}
-                                     min={0}
-                                     onChange={(e) => updateMarking(q.id, { marks_awarded: Number(e.target.value) })}
-                                     className="w-10 bg-transparent text-white font-black text-sm focus:outline-none"
-                                   />
-                                   <span className="text-[10px] font-black text-slate-500 uppercase">PTS</span>
-                                </div>
-                             </div>
+                                {q.question_type !== 'content_block' && (
+                                  <>
+                                    <span className="text-[10px] font-black text-slate-600 uppercase">Max Points: {q.marks}</span>
+                                    <div className="flex items-center gap-2 bg-slate-900 px-4 py-2 rounded-xl border border-white/5">
+                                       <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                                       <input 
+                                         type="number" 
+                                         value={markings[q.id]?.marks_awarded ?? 0}
+                                         max={q.marks}
+                                         min={0}
+                                         onChange={(e) => updateMarking(q.id, { marks_awarded: Number(e.target.value) })}
+                                         className="w-10 bg-transparent text-white font-black text-sm focus:outline-none"
+                                       />
+                                       <span className="text-[10px] font-black text-slate-500 uppercase">PTS</span>
+                                    </div>
+                                  </>
+                                )}
+                              </div>
                           </div>
                           
-                          <p className="text-lg font-medium text-slate-200 leading-relaxed">{q.question_text}</p>
+                          <p className={cn("text-lg font-medium leading-relaxed", q.question_type === 'content_block' ? "font-serif text-slate-300 whitespace-pre-wrap" : "text-slate-200")}>{q.question_text}</p>
                        </div>
 
                        {/* Student Answer View */}
-                       <div className="p-8 bg-slate-900/40">
-                          <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
-                             <FileText className="w-3 h-3 text-emerald-400" /> Inbound Response
-                          </h3>
-                          <div className="p-6 bg-slate-950/50 border border-white/5 rounded-2xl">
-                             {answers[q.id]?.answer_text ? (
-                                <p className="text-slate-300 italic">"{answers[q.id].answer_text}"</p>
-                             ) : answers[q.id]?.answer_json ? (
-                                <div className="flex flex-wrap gap-2">
-                                   {Array.isArray(answers[q.id].answer_json) && answers[q.id].answer_json.map((opt: string, i: number) => (
-                                     <span key={i} className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold">
-                                        {opt}
-                                     </span>
-                                   ))}
-                                </div>
-                             ) : (
-                                <p className="text-slate-600 text-xs italic">No digital footprint found for this unit.</p>
-                             )}
-                          </div>
-                       </div>
+                       {q.question_type !== 'content_block' && (
+                         <>
+                           <div className="p-8 bg-slate-900/40">
+                              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-4 flex items-center gap-2">
+                                 <FileText className="w-3 h-3 text-emerald-400" /> Inbound Response
+                              </h3>
+                              <div className="p-6 bg-slate-950/50 border border-white/5 rounded-2xl">
+                                 {answers[q.id]?.answer_text ? (
+                                    <p className="text-slate-300 italic whitespace-pre-wrap">"{answers[q.id].answer_text}"</p>
+                                 ) : answers[q.id]?.answer_json ? (
+                                    <div className="flex flex-wrap gap-2">
+                                       {Array.isArray(answers[q.id].answer_json) && answers[q.id].answer_json.map((opt: string, i: number) => (
+                                         <span key={i} className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg text-xs font-bold">
+                                            {opt}
+                                         </span>
+                                       ))}
+                                    </div>
+                                 ) : (
+                                    <p className="text-slate-600 text-xs italic">No digital footprint found for this unit.</p>
+                                 )}
+                              </div>
+                           </div>
 
-                       {/* Annotation Area (Manual triggering) */}
-                       <div className="p-8 border-t border-white/5 space-y-6">
-                          <div className="flex items-center justify-between">
-                            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Annotation Layer</h3>
-                            {markings[q.id]?.annotation_data?.length ? (
-                               <span className="text-[9px] font-black text-amber-400 uppercase flex items-center gap-1">
-                                  <Check className="w-3 h-3" /> {markings[q.id].annotation_data.length} Marks Encrypted
-                               </span>
-                            ) : (
-                               <span className="text-[9px] font-black text-rose-500 uppercase">Attention Required</span>
-                            )}
-                          </div>
+                           {/* Annotation Area (Manual triggering) */}
+                           <div className="p-8 border-t border-white/5 space-y-6">
+                              <div className="flex items-center justify-between">
+                                <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Annotation Layer</h3>
+                                {markings[q.id]?.annotation_data?.length ? (
+                                   <span className="text-[9px] font-black text-amber-400 uppercase flex items-center gap-1">
+                                      <Check className="w-3 h-3" /> {markings[q.id].annotation_data.length} Marks Encrypted
+                                   </span>
+                                ) : (
+                                   <span className="text-[9px] font-black text-rose-500 uppercase">Attention Required</span>
+                                )}
+                              </div>
 
-                          <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl flex items-center justify-between">
-                             <div className="flex items-center gap-4">
-                                <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
-                                   <BookOpen className="w-6 h-6" />
-                                </div>
-                                <div>
-                                   <p className="text-xs font-black text-white uppercase tracking-tight">Launch Visualization Engine</p>
-                                   <p className="text-[10px] text-slate-500 font-bold mt-0.5 uppercase tracking-widest">Apply Ticks, Crosses & Comments</p>
-                                </div>
-                             </div>
-                             <button 
-                               onClick={() => setAnnotatingQuestionId(q.id)}
-                               className="px-6 py-2.5 bg-slate-900 hover:bg-indigo-500 text-slate-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-                             >
-                                Open Canvas
-                             </button>
-                          </div>
+                              <div className="p-5 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl flex items-center justify-between">
+                                 <div className="flex items-center gap-4">
+                                    <div className="w-12 h-12 rounded-xl bg-indigo-500/10 flex items-center justify-center text-indigo-400">
+                                       <BookOpen className="w-6 h-6" />
+                                    </div>
+                                    <div>
+                                       <p className="text-xs font-black text-white uppercase tracking-tight">Launch Visualization Engine</p>
+                                       <p className="text-[10px] text-slate-500 font-bold mt-0.5 uppercase tracking-widest">Apply Ticks, Crosses & Comments</p>
+                                    </div>
+                                 </div>
+                                 <button 
+                                   onClick={() => setAnnotatingQuestionId(q.id)}
+                                   className="px-6 py-2.5 bg-slate-900 hover:bg-indigo-500 text-slate-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                                 >
+                                    Open Canvas
+                                 </button>
+                              </div>
 
-                          <div className="space-y-3">
-                             <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Expert Evaluation</p>
-                             <textarea 
-                               value={markings[q.id]?.teacher_comment ?? ''}
-                               onChange={(e) => updateMarking(q.id, { teacher_comment: e.target.value })}
-                               placeholder="Draft your professional feedback for this specific unit..."
-                               rows={3}
-                               className="w-full bg-slate-950/30 border border-white/5 rounded-2xl p-4 text-xs italic text-indigo-300 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none"
-                             />
-                          </div>
-                       </div>
+                              <div className="space-y-3">
+                                 <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Expert Evaluation</p>
+                                 <textarea 
+                                   value={markings[q.id]?.teacher_comment ?? ''}
+                                   onChange={(e) => updateMarking(q.id, { teacher_comment: e.target.value })}
+                                   placeholder="Draft your professional feedback for this specific unit..."
+                                   rows={3}
+                                   className="w-full bg-slate-950/30 border border-white/5 rounded-2xl p-4 text-xs italic text-indigo-300 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none"
+                                 />
+                              </div>
+                           </div>
+                         </>
+                       )}
                     </div>
                  </div>
                ))}
@@ -499,33 +508,47 @@ export default function PremiumWorksheetMarking({
           </div>
        </div>
 
-      {annotatingQuestionId && (
-        <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col">
-           <div className="h-16 border-b border-white/10 flex items-center justify-between px-8 bg-[#0a0c10]">
-              <div className="flex items-center gap-4">
-                 <button onClick={() => setAnnotatingQuestionId(null)} className="p-2 text-slate-400 hover:text-white transition-colors">
-                    <ChevronLeft className="w-5 h-5" />
-                 </button>
-                 <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activeQuestions.findIndex(q => q.id === annotatingQuestionId) + 1} Annotation Layer</h2>
-              </div>
-              <button 
-                onClick={() => setAnnotatingQuestionId(null)}
-                className="px-6 py-2 bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest"
-              >
-                 Done Marking
-              </button>
-           </div>
-           <div className="flex-1 overflow-hidden">
-              <PremiumAnnotationEngine 
-                imageUrl="https://images.unsplash.com/photo-1586075010633-244414ec373c?q=80&w=2000" // Placeholder background
-                initialAnnotations={markings[annotatingQuestionId]?.annotation_data || []}
-                onSave={(data) => {
-                  updateMarking(annotatingQuestionId, { annotation_data: data });
-                }}
-              />
-           </div>
-        </div>
-      )}
+      {annotatingQuestionId && (() => {
+        const q = activeQuestions.find(q => q.id === annotatingQuestionId);
+        if (!q) return null;
+        
+        const ans = answers[q.id];
+        let ansText = ans?.answer_text;
+        if (!ansText && ans?.answer_json) {
+           ansText = Array.isArray(ans.answer_json) ? ans.answer_json.join(', ') : JSON.stringify(ans.answer_json);
+        }
+
+        return (
+          <div className="fixed inset-0 z-[100] bg-black/90 flex flex-col">
+             <div className="h-16 border-b border-white/10 flex items-center justify-between px-8 bg-[#0a0c10]">
+                <div className="flex items-center gap-4">
+                   <button onClick={() => setAnnotatingQuestionId(null)} className="p-2 text-slate-400 hover:text-white transition-colors">
+                      <ChevronLeft className="w-5 h-5" />
+                   </button>
+                   <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activeQuestions.findIndex(quest => quest.id === annotatingQuestionId) + 1} Annotation Layer</h2>
+                </div>
+                <button 
+                  onClick={() => setAnnotatingQuestionId(null)}
+                  className="px-6 py-2 bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest"
+                >
+                   Done Marking
+                </button>
+             </div>
+             <div className="flex-1 overflow-hidden">
+                <PremiumAnnotationEngine 
+                  questionContext={{
+                    text: q.question_text || '',
+                    answer: ansText || 'No digital footprint found'
+                  }}
+                  initialAnnotations={markings[annotatingQuestionId]?.annotation_data || []}
+                  onSave={(data) => {
+                    updateMarking(annotatingQuestionId, { annotation_data: data });
+                  }}
+                />
+             </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

@@ -7,7 +7,7 @@ import { Plus, Trash2, ChevronUp, ChevronDown, FileText,
   CheckSquare, Image as ImageIcon, Pencil, Hash, 
   HelpCircle, ChevronRight, ChevronLeft, MoreVertical,
   Maximize2, Move, AlertCircle, Loader2, Sigma, Table as TableIcon,
-  Copy, X
+  Copy, X, BookOpen
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -80,6 +80,7 @@ const QUESTION_TYPES = [
   { id: 'drawing', label: 'Drawing Area', icon: Pencil },
   { id: 'equation', label: 'Math Equation', icon: Sigma },
   { id: 'table', label: 'Table Response', icon: TableIcon },
+  { id: 'content_block', label: 'Reading Passage', icon: BookOpen },
 ];
 
 export default function PremiumWorksheetBuilder({ 
@@ -357,7 +358,7 @@ export default function PremiumWorksheetBuilder({
   }
 
   return (
-    <div className="fixed inset-0 bg-[#0a0c10] overflow-hidden z-[200] flex">
+    <div className="fixed inset-0 w-full h-[100dvh] bg-[#0a0c10] overflow-hidden z-[200] flex">
       {/* ── MOBILE OVERLAY ── */}
       {isSidebarOpen && (
         <div 
@@ -434,52 +435,69 @@ export default function PremiumWorksheetBuilder({
       {/* ── MAIN AREA: PAGE EDITOR ── */}
       <div className="flex-1 flex flex-col overflow-hidden relative min-w-0">
         {/* Toolbar */}
-        <div className="h-auto min-h-[5rem] sm:h-20 bg-[#0f1117] border-b border-slate-800 p-3 sm:px-8 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 z-10 shrink-0">
-          <div className="flex items-center gap-3 lg:gap-6 w-full sm:w-auto overflow-hidden">
+        <div className="h-auto min-h-[5rem] sm:h-20 bg-[#0f1117] border-b border-slate-800 p-3 sm:px-8 flex flex-col lg:flex-row items-center gap-3 lg:gap-6 w-full z-10 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 w-full lg:w-auto justify-between lg:justify-start">
             <button 
               onClick={() => setIsSidebarOpen(!isSidebarOpen)}
-              className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors shrink-0"
+              className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors"
             >
               <Layout className="w-5 h-5" />
             </button>
-            <div className="hidden sm:block h-8 w-px bg-slate-800 shrink-0" />
             
-            {/* Scrollable Question Types on Mobile */}
-            <div className="flex-1 overflow-x-auto no-scrollbar scroll-smooth">
-              <div className="flex items-center gap-2 py-1">
-                 {QUESTION_TYPES.map(({ id, label, icon: Icon }) => (
-                   <button 
-                     key={id}
-                     onClick={() => addQuestion(id)}
-                     className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-400 hover:text-white hover:border-indigo-500/50 transition-all text-[10px] font-black uppercase tracking-wider whitespace-nowrap shrink-0"
-                   >
-                     <Icon className="w-3.5 h-3.5" />
-                     <span className="hidden md:inline">{label}</span>
-                   </button>
-                 ))}
-              </div>
+            {/* Mobile Actions shown only on small screens next to toggle */}
+            <div className="flex items-center gap-2 lg:hidden">
+              <button 
+                onClick={onClose}
+                className="px-3 py-1.5 border border-slate-700 text-slate-400 hover:text-white rounded-lg text-[10px] font-black uppercase tracking-wider transition-all"
+              >
+                Close
+              </button>
+              <button 
+                onClick={async () => {
+                  await saveWorksheet();
+                  setShowPreview(true);
+                }}
+                className="px-3 py-1.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-wider transition-all shadow-lg flex items-center gap-1"
+              >
+                <Eye className="w-3.5 h-3.5" /> Preview
+              </button>
+            </div>
+            <div className="hidden lg:block h-8 w-px bg-slate-800" />
+          </div>
+          
+          {/* Scrollable Question Types */}
+          <div className="flex-1 w-full overflow-x-auto no-scrollbar scroll-smooth">
+            <div className="flex items-center gap-2 py-1 w-max">
+               {QUESTION_TYPES.map(({ id, label, icon: Icon }) => (
+                 <button 
+                   key={id}
+                   onClick={() => addQuestion(id)}
+                   className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800/50 border border-slate-700/50 text-slate-400 hover:text-white hover:border-indigo-500/50 transition-all text-[10px] sm:text-[11px] font-black uppercase tracking-wider whitespace-nowrap"
+                 >
+                   <Icon className="w-3.5 h-3.5" />
+                   <span>{label}</span>
+                 </button>
+               ))}
             </div>
           </div>
           
-          <div className="flex items-center justify-end gap-2 lg:gap-4 w-full sm:w-auto shrink-0">
+          {/* Desktop Actions */}
+          <div className="hidden lg:flex items-center justify-end gap-4 shrink-0">
             <button 
               onClick={onClose}
-              className="px-4 py-2 sm:py-2.5 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-wider transition-all flex items-center gap-2"
+              className="px-6 py-2.5 border border-slate-700 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl text-xs font-black uppercase tracking-wider transition-all"
             >
-              <span className="hidden sm:inline">Close Builder</span>
-              <span className="sm:hidden">Close</span>
-              <X className="w-4 h-4 sm:hidden" />
+              Close Builder
             </button>
             <button 
               onClick={async () => {
                 await saveWorksheet();
                 setShowPreview(true);
               }}
-              className="p-2 sm:px-6 sm:py-2.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-[10px] lg:text-xs font-black uppercase tracking-wider transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+              className="px-6 py-2.5 bg-indigo-500 text-white hover:bg-indigo-600 rounded-xl text-xs font-black uppercase tracking-wider transition-all shadow-lg flex items-center gap-2"
             >
-              <Eye className="w-4 h-4 lg:w-5 h-5" />
-              <span className="hidden sm:inline">Preview Student View</span>
-              <span className="sm:hidden">Preview</span>
+              <Eye className="w-5 h-5" />
+              Preview Student View
             </button>
           </div>
         </div>
@@ -548,16 +566,18 @@ export default function PremiumWorksheetBuilder({
 
                          </div>
                          <div className="flex items-center gap-4">
-                            <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800">
-                               <span className="text-[10px] font-black text-slate-500 uppercase">Weight</span>
-                               <input 
-                                 type="number"
-                                 value={q.marks}
-                                 onChange={(e) => updateQuestion(qIdx, { marks: Number(e.target.value) })}
-                                 className="w-8 bg-transparent text-indigo-400 font-black text-sm focus:outline-none"
-                               />
-                               <span className="text-[10px] font-black text-indigo-400 uppercase">Marks</span>
-                            </div>
+                            {q.question_type !== 'content_block' && (
+                              <div className="flex items-center gap-2 bg-slate-900/50 px-4 py-2 rounded-xl border border-slate-800">
+                                 <span className="text-[10px] font-black text-slate-500 uppercase">Weight</span>
+                                 <input 
+                                   type="number"
+                                   value={q.marks}
+                                   onChange={(e) => updateQuestion(qIdx, { marks: Number(e.target.value) })}
+                                   className="w-8 bg-transparent text-indigo-400 font-black text-sm focus:outline-none"
+                                 />
+                                 <span className="text-[10px] font-black text-indigo-400 uppercase">Marks</span>
+                              </div>
+                            )}
                             <button 
                               onClick={() => removeQuestion(qIdx)}
                               className="p-2.5 text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 rounded-[1rem] transition-all"
@@ -572,9 +592,12 @@ export default function PremiumWorksheetBuilder({
                         <textarea 
                           value={q.question_text}
                           onChange={(e) => updateQuestion(qIdx, { question_text: e.target.value })}
-                          placeholder="Define the query for the learner... Use $formula$ for Math (e.g. $E=mc^2$)"
-                          rows={3}
-                          className="w-full bg-[#0a0c10] border border-slate-800/50 rounded-2xl p-6 text-slate-200 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all text-sm leading-relaxed"
+                          placeholder={q.question_type === 'content_block' ? "Paste reading passage, poem, or context here..." : "Define the query for the learner... Use $formula$ for Math (e.g. $E=mc^2$)"}
+                          rows={q.question_type === 'content_block' ? 8 : 3}
+                          className={cn(
+                            "w-full bg-[#0a0c10] border border-slate-800/50 rounded-2xl p-6 text-slate-200 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all text-sm leading-relaxed",
+                            q.question_type === 'content_block' ? "whitespace-pre-wrap resize-y" : ""
+                          )}
                         />
                         
                         {/* Science/Math Preview */}
@@ -590,25 +613,27 @@ export default function PremiumWorksheetBuilder({
                       </div>
 
                       {/* Question Hint */}
-                      <div className="flex flex-col gap-3 p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
-                         <div className="flex items-center gap-3">
-                           <HelpCircle className="w-4 h-4 text-emerald-500/50" />
-                           <input 
-                             value={q.hint}
-                             onChange={(e) => updateQuestion(qIdx, { hint: e.target.value })}
-                             placeholder="Architect a hint for student context... ($formula$ supported)"
-                             className="flex-1 bg-transparent text-emerald-400 text-xs font-bold placeholder:text-emerald-900/50 focus:outline-none"
-                           />
-                         </div>
-                         {q.hint.includes('$') && (
-                            <div className="pt-2 mt-2 border-t border-emerald-500/10">
-                              <MathContent 
-                                content={q.hint} 
-                                className="text-emerald-400/70 text-[10px] italic" 
-                              />
-                            </div>
-                         )}
-                      </div>
+                      {q.question_type !== 'content_block' && (
+                        <div className="flex flex-col gap-3 p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                           <div className="flex items-center gap-3">
+                             <HelpCircle className="w-4 h-4 text-emerald-500/50" />
+                             <input 
+                               value={q.hint}
+                               onChange={(e) => updateQuestion(qIdx, { hint: e.target.value })}
+                               placeholder="Architect a hint for student context... ($formula$ supported)"
+                               className="flex-1 bg-transparent text-emerald-400 text-xs font-bold placeholder:text-emerald-900/50 focus:outline-none"
+                             />
+                           </div>
+                           {q.hint.includes('$') && (
+                              <div className="pt-2 mt-2 border-t border-emerald-500/10">
+                                <MathContent 
+                                  content={q.hint} 
+                                  className="text-emerald-400/70 text-[10px] italic" 
+                                />
+                              </div>
+                           )}
+                        </div>
+                      )}
 
 
                       {/* Type-specific Options */}
@@ -679,7 +704,7 @@ export default function PremiumWorksheetBuilder({
       </div>
 
       {showPreview && assignment && (
-        <div className="fixed inset-0 z-[100] bg-black">
+        <div className="fixed inset-0 w-full h-[100dvh] z-[100] bg-black flex flex-col">
           <PremiumWorksheetPlayer 
             assignmentId={assignmentId} 
             studentId="preview-teacher" 
