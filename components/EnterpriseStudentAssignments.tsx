@@ -805,7 +805,7 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
                   <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-1">Your Score</p>
                   <div className="flex items-center gap-2 text-emerald-400 font-black">
                     <Trophy className="w-4 h-4" />
-                    <span className="text-sm">{submission.score} / {assignment.total_marks || 100}</span>
+                    <span className="text-sm">{submission.score} / {assignment.total_marks}</span>
                   </div>
                 </div>
               )}
@@ -823,12 +823,14 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
                   <Trophy className="w-4 h-4" /> Review Annotated Worksheet
                 </button>
               )}
-              <button
-                onClick={() => setSelectedAssignment(assignment)}
-                className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
-              >
-                {submission ? "View Submission" : "Open Assignment"} <ArrowRight className="w-4 h-4" />
-              </button>
+              {(!(isMarked && (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE' || assignment.type === 'ONLINE_WORKSHEET'))) && (
+                <button
+                  onClick={() => setSelectedAssignment(assignment)}
+                  className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+                >
+                  {submission ? "View Submission" : "Open Assignment"} <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </div>
         </div>

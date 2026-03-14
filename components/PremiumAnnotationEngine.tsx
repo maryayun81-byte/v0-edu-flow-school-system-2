@@ -171,6 +171,27 @@ export default function PremiumAnnotationEngine({
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
 
+    if (readOnly) {
+      canvas.isDrawingMode = false;
+      canvas.selection = false;
+      canvas.defaultCursor = 'default';
+      canvas.hoverCursor = 'default';
+      
+      // Lock all objects
+      canvas.forEachObject(obj => {
+        obj.selectable = false;
+        obj.evented = false;
+        obj.lockMovementX = true;
+        obj.lockMovementY = true;
+        obj.lockRotation = true;
+        obj.lockScalingX = true;
+        obj.lockScalingY = true;
+      });
+      
+      canvas.requestRenderAll();
+      return;
+    }
+
     canvas.isDrawingMode = tool === 'pen' || tool === 'highlighter';
     if (canvas.isDrawingMode) {
       canvas.freeDrawingBrush = new fabric.PencilBrush(canvas);
@@ -182,7 +203,7 @@ export default function PremiumAnnotationEngine({
     } else {
       canvas.defaultCursor = 'crosshair';
     }
-  }, [tool, color, strokeWidth]);
+  }, [tool, color, strokeWidth, readOnly]);
 
   const addStaticShape = (type: MarkerTool) => {
     const canvas = fabricCanvasRef.current;

@@ -7,7 +7,7 @@ import {
   Clock, AlertCircle, Loader2, CheckCircle2,
   FileText, Image as ImageIcon, Pencil, List,
   CheckSquare, Type, Hash, HelpCircle, Layout,
-  MessageCircle, Star
+  MessageCircle, Star, Trophy, TrendingUp, TrendingDown, XCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -87,6 +87,12 @@ export default function PremiumWorksheetPlayer(props: {
   const [viewingAnnotationsId, setViewingAnnotationsId] = useState<string | null>(null);
   const [lastSaved, setLastSaved] = useState<Date | null>(null);
   const [showReviewModal, setShowReviewModal] = useState(false);
+  const [globalFeedback, setGlobalFeedback] = useState<{
+    strengths: string[];
+    weaknesses: string[];
+    improvement_suggestions?: string[];
+    teacher_remarks?: string;
+  } | null>(null);
 
   useEffect(() => {
     fetchWorksheetAndAnswers();
@@ -175,15 +181,31 @@ export default function PremiumWorksheetPlayer(props: {
         }
 
         // 4. Fetch Markings (if in review mode or already submitted)
-        const { data: markingData } = await supabase
-          .from('question_markings')
-          .select('*')
-          .eq('submission_id', currentSubId);
+        const [markingRes, feedbackRes] = await Promise.all([
+          supabase
+            .from('question_markings')
+            .select('*')
+            .eq('submission_id', currentSubId),
+          supabase
+            .from('submission_feedback')
+            .select('*')
+            .eq('submission_id', currentSubId)
+            .maybeSingle()
+        ]);
         
-        if (markingData) {
+        if (markingRes.data) {
           const markingMap: Record<string, any> = {};
-          markingData.forEach((m: any) => { markingMap[m.question_id] = m; });
+          markingRes.data.forEach((m: any) => { markingMap[m.question_id] = m; });
           setMarkings(markingMap);
+        }
+
+        if (feedbackRes.data) {
+          setGlobalFeedback({
+            strengths: feedbackRes.data.strengths || [],
+            weaknesses: feedbackRes.data.weaknesses || [],
+            improvement_suggestions: feedbackRes.data.improvement_suggestions || [],
+            teacher_remarks: feedbackRes.data.teacher_remarks
+          });
         }
       }
     } catch (err: any) {
@@ -377,7 +399,7 @@ export default function PremiumWorksheetPlayer(props: {
           {reviewMode && (
              <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg shrink-0 mr-2">
                 <Star className="w-4 h-4 text-emerald-400 hidden sm:block" />
-                <span className="text-xs font-black text-emerald-400">Score: {studentScore}/{worksheetTotalMarks}</span>
+                <span className="text-xs font-black text-emerald-400">Score: {studentScore} / {worksheetTotalMarks}</span>
              </div>
           )}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-[10px] font-bold text-slate-500 uppercase shrink-0">
@@ -386,18 +408,20 @@ export default function PremiumWorksheetPlayer(props: {
                 {lastSaved ? `Synced ${lastSaved.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : 'Not synced'}
              </span>
           </div>
-          <button 
-            onClick={() => {
-              if (reviewMode || isPreview) submitWorksheet();
-              else setShowReviewModal(true);
-            }}
-            disabled={submitting}
-            className="px-4 sm:px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 shrink-0"
-          >
-            {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-            <span className="hidden sm:inline">{reviewMode ? 'Viewing Graded Work' : 'Submit Work'}</span>
-            <span className="sm:hidden">{reviewMode ? 'View' : 'Submit'}</span>
-          </button>
+          {!reviewMode && (
+            <button 
+              onClick={() => {
+                if (isPreview) submitWorksheet();
+                else setShowReviewModal(true);
+              }}
+              disabled={submitting}
+              className="px-4 sm:px-6 py-2.5 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-[10px] sm:text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2 shrink-0"
+            >
+              {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+              <span className="hidden sm:inline">Submit Work</span>
+              <span className="sm:hidden">Submit</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -408,6 +432,62 @@ export default function PremiumWorksheetPlayer(props: {
       >
         <div className="max-w-3xl mx-auto space-y-8">
           
+          {/* Global Feedback Summary (Performance Report) */}
+          {reviewMode && globalFeedback && (
+             <div className="mb-12 space-y-4 animate-in fade-in slide-in-from-top-4 duration-700">
+               <div className="flex items-center gap-3 mb-6">
+                 <div className="p-2 bg-indigo-500/20 rounded-xl">
+                   <Trophy className="w-5 h-5 text-indigo-400" />
+                 </div>
+                 <h2 className="text-xl font-black text-white uppercase tracking-[0.2em]">Overall Evaluation</h2>
+               </div>
+
+               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                 {/* Strengths */}
+                 <div className="p-6 bg-emerald-500/5 border border-emerald-500/10 rounded-2xl">
+                   <div className="flex items-center gap-2 mb-4">
+                     <TrendingUp className="w-4 h-4 text-emerald-400" />
+                     <span className="text-[10px] font-black text-emerald-400 uppercase tracking-widest">Cognitive Strengths</span>
+                   </div>
+                   <div className="space-y-2">
+                      {globalFeedback.strengths.length > 0 ? globalFeedback.strengths.map((s, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                           <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0 mt-0.5" />
+                           <span>{s}</span>
+                        </div>
+                      )) : <p className="text-sm text-slate-500 italic">No specific strengths noted.</p>}
+                   </div>
+                 </div>
+
+                 {/* Weaknesses */}
+                 <div className="p-6 bg-rose-500/5 border border-rose-500/10 rounded-2xl">
+                   <div className="flex items-center gap-2 mb-4">
+                     <TrendingDown className="w-4 h-4 text-rose-400" />
+                     <span className="text-[10px] font-black text-rose-400 uppercase tracking-widest">Performance Gaps</span>
+                   </div>
+                   <div className="space-y-2">
+                      {globalFeedback.weaknesses.length > 0 ? globalFeedback.weaknesses.map((w, i) => (
+                        <div key={i} className="flex items-start gap-2 text-sm text-slate-300">
+                           <XCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                           <span>{w}</span>
+                        </div>
+                      )) : <p className="text-sm text-slate-500 italic">No specific gaps identified.</p>}
+                   </div>
+                 </div>
+               </div>
+
+               {/* Teacher Remarks */}
+               {globalFeedback.teacher_remarks && (
+                 <div className="p-6 bg-indigo-500/5 border border-indigo-500/10 rounded-2xl mt-4">
+                   <p className="text-[10px] font-black text-indigo-400 uppercase tracking-widest mb-3">Professional Remarks</p>
+                   <p className="text-sm italic text-slate-300 leading-relaxed leading-[1.8]">
+                     "{globalFeedback.teacher_remarks}"
+                   </p>
+                 </div>
+               )}
+             </div>
+          )}
+
           {/* Questions */}
           {activePage.questions.map((q, idx) => (
              <div 
