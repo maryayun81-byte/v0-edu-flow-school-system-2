@@ -323,8 +323,32 @@ export default function PremiumWorksheetPlayer(props: {
     );
   }
 
+  if (pages.length === 0) {
+    return (
+      <div className="flex flex-col h-full bg-[#0a0c10] text-slate-200">
+        <div className="bg-[#0f1117] border-b border-slate-800 p-4 sm:px-8 sm:h-20 flex flex-col sm:flex-row items-center justify-between z-10 w-full h-20">
+          <div className="flex items-center gap-4">
+             <button 
+               onClick={onClose}
+               className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors shrink-0"
+             >
+               <ChevronLeft className="w-6 h-6" />
+             </button>
+          </div>
+        </div>
+        <div className="flex flex-col items-center justify-center flex-1 space-y-4">
+           <AlertCircle className="w-12 h-12 text-slate-500" />
+           <p className="text-slate-400 font-bold">No interactive pages found for this assignment.</p>
+        </div>
+      </div>
+    );
+  }
+
   const activePage = pages[activePageIndex];
   const progress = (Object.keys(answers).length / pages.reduce((acc, p) => acc + p.questions.length, 0)) * 100;
+
+  const worksheetTotalMarks = Math.max(1, pages.reduce((sum, p) => sum + p.questions.reduce((qSum, q) => qSum + (q.marks || 0), 0), 0));
+  const studentScore = Object.values(markings).reduce((sum, m) => sum + (m.marks_awarded || 0), 0);
 
   return (
     <div className="flex flex-col h-full bg-[#0a0c10] text-slate-200">
@@ -350,6 +374,12 @@ export default function PremiumWorksheetPlayer(props: {
         </div>
 
         <div className="flex items-center justify-between sm:justify-end gap-3 sm:gap-4 w-full sm:w-auto">
+          {reviewMode && (
+             <div className="flex items-center gap-2 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg shrink-0 mr-2">
+                <Star className="w-4 h-4 text-emerald-400 hidden sm:block" />
+                <span className="text-xs font-black text-emerald-400">Score: {studentScore}/{worksheetTotalMarks}</span>
+             </div>
+          )}
           <div className="flex items-center gap-2 px-3 py-1.5 bg-slate-800/50 rounded-lg border border-slate-700/50 text-[10px] font-bold text-slate-500 uppercase shrink-0">
              <Clock className="w-3 h-3 hidden sm:block" />
              <span className="truncate max-w-[100px] sm:max-w-none">
@@ -585,35 +615,60 @@ export default function PremiumWorksheetPlayer(props: {
       </div>
 
       {/* ── ANNOTATION VIEW MODAL ── */}
-      {viewingAnnotationsId && (
-        <div className="fixed inset-0 z-[110] bg-black/95 flex flex-col animate-in fade-in duration-300">
-           <div className="h-20 bg-[#0f1117] border-b border-white/5 px-8 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                 <button onClick={() => setViewingAnnotationsId(null)} className="p-2 text-slate-400 hover:text-white transition-colors">
-                    <ChevronLeft className="w-5 h-5" />
-                 </button>
-                 <div>
-                    <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Visual Assessment Layer</p>
-                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activePage.questions.findIndex(q => q.id === viewingAnnotationsId) + 1} Annotations</h2>
-                 </div>
-              </div>
-              <button 
-                onClick={() => setViewingAnnotationsId(null)}
-                className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
-              >
-                Close Engine
-              </button>
-           </div>
-           <div className="flex-1">
-              <PremiumAnnotationEngine 
-                imageUrl="https://images.unsplash.com/photo-1586075010633-244414ec373c?q=80&w=2000"
-                initialAnnotations={markings[viewingAnnotationsId]?.annotation_data || []}
-                onSave={() => {}}
-                readOnly={true}
-              />
-           </div>
-        </div>
-      )}
+      {viewingAnnotationsId && (() => {
+        const q = activePage.questions.find(quest => quest.id === viewingAnnotationsId);
+        if (!q) return null;
+        
+        const ans = answers[q.id];
+        let ansText = ans?.answer_text;
+        if (!ansText && ans?.answer_json) {
+           ansText = Array.isArray(ans.answer_json) ? ans.answer_json.join(', ') : JSON.stringify(ans.answer_json);
+        }
+
+        return (
+          <div className="fixed inset-0 z-[110] bg-black/95 flex flex-col animate-in fade-in duration-300">
+             <div className="h-20 bg-[#0f1117] border-b border-white/5 px-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                   <button onClick={() => setViewingAnnotationsId(null)} className="p-2 text-slate-400 hover:text-white transition-colors">
+                      <ChevronLeft className="w-5 h-5" />
+                   </button>
+                   <div>
+                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Visual Assessment Layer</p>
+                      <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activePage.questions.findIndex(quest => quest.id === viewingAnnotationsId) + 1} Annotations</h2>
+                   </div>
+                </div>
+                <button 
+                  onClick={() => setViewingAnnotationsId(null)}
+                  className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                >
+                  Close Engine
+                </button>
+             </div>
+             <div className="flex-1 overflow-hidden">
+                <PremiumAnnotationEngine 
+                  initialAnnotations={markings[viewingAnnotationsId]?.annotation_data || []}
+                  onSave={() => {}}
+                  readOnly={true}
+                >
+                   <div className="space-y-12 max-w-4xl mx-auto py-12 px-8">
+                     <div className="p-8 bg-slate-50 border border-slate-200 rounded-3xl">
+                        <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">Question Blueprint</h3>
+                        <p className="text-2xl font-black text-slate-900 leading-tight">{q.question_text}</p>
+                     </div>
+
+                     <div className="p-8 bg-indigo-50 border border-indigo-100 rounded-3xl">
+                        <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-4">Student Response</h3>
+                        <p className="text-xl font-bold text-indigo-900 whitespace-pre-wrap">{ansText || 'No digital footprint found'}</p>
+                     </div>
+                     
+                     {/* Safe space for annotations */}
+                     <div className="h-48" />
+                   </div>
+                </PremiumAnnotationEngine>
+             </div>
+          </div>
+        );
+      })()}
 
       {/* ── PRE-SUBMISSION REVIEW MODAL ── */}
       {showReviewModal && (

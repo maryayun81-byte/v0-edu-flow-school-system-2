@@ -42,7 +42,7 @@ import {
   TabsTrigger
 } from "@/components/ui/tabs";
 import { FloatingActionMenu } from '@/components/FloatingActionMenu';
-import AssignmentWizard from '@/components/AssignmentWizard';
+import EnterpriseAssignmentCreator from '@/components/EnterpriseAssignmentCreator';
 import TeacherAssignmentDashboard from '@/components/TeacherAssignmentDashboard';
 import { TeacherDashboardSkeleton } from '@/components/TeacherDashboardSkeleton';
 import { PwaInstallButton } from '@/components/PwaInstallButton';
@@ -1016,7 +1016,7 @@ export default function TeacherDashboard() {
 
       {/* Global Modals */}
       {showAssignmentForm && user && (
-        <AssignmentWizard 
+        <EnterpriseAssignmentCreator
           userId={user.id} 
           onClose={() => setShowAssignmentForm(false)}
           onSuccess={() => {

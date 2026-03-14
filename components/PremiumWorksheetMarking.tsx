@@ -6,7 +6,8 @@ import {
   ChevronLeft, ChevronRight, Save, Send, 
   CheckCircle2, AlertCircle, Loader2, BookOpen,
   User, Calendar, Trophy, MessageSquare, 
-  Layout, FileText, ChevronDown, Check, Star, X
+  Layout, FileText, ChevronDown, Check, Star, X,
+  CheckSquare
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -41,11 +42,13 @@ interface QuestionMarking {
 export default function PremiumWorksheetMarking({ 
   submissionId, 
   onClose,
-  onReturn 
+  onReturn,
+  reviewMode
 }: { 
   submissionId: string; 
   onClose: () => void;
   onReturn?: () => void;
+  reviewMode?: boolean;
 }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -176,26 +179,40 @@ export default function PremiumWorksheetMarking({
 
       if (finalize) {
         const totalAwarded = Object.values(markings).reduce((sum, m) => sum + (m.marks_awarded || 0), 0);
-        await supabase
+        const { error: subErr } = await supabase
           .from('student_submissions')
           .update({
             status: 'RETURNED',
             score: totalAwarded,
-            returned_at: new Date().toISOString(),
+          })
+          .eq('id', submissionId);
+          
+        if (subErr) throw subErr;
+
+        // SYNC to submission_feedback for dashboard compatibility
+        const { error: fbErr } = await supabase
+          .from('submission_feedback')
+          .upsert({
+            submission_id: submissionId,
+            score: totalAwarded,
             strengths,
             weaknesses,
             improvement_suggestions: improvements,
-            teacher_remarks: generalComment
-          })
-          .eq('id', submissionId);
+            teacher_remarks: generalComment,
+            is_returned: true,
+            returned_at: new Date().toISOString()
+          }, { onConflict: 'submission_id' });
+          
+        if (fbErr) throw fbErr;
         
         toast.success('Assignment returned to student successfully');
         onReturn?.();
         onClose();
       } else {
-        toast.success('Markings saved as draft');
+        toast.success('Draft markings saved successfully. You can continue later.');
       }
     } catch (err) {
+      console.error("Failed to save markings:", err);
       toast.error('Failed to save markings');
     } finally {
       setSaving(false);
@@ -242,14 +259,21 @@ export default function PremiumWorksheetMarking({
                 </p>
              </div>
           </div>
-          <button 
-            onClick={() => saveMarkings(true)}
-            disabled={saving}
-            className="px-8 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
-          >
-             {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-             Return Result
-          </button>
+          {!reviewMode && (
+            <button 
+              onClick={() => saveMarkings(true)}
+              disabled={saving}
+              className="px-8 py-3 bg-indigo-500 hover:bg-indigo-600 disabled:bg-indigo-500/50 text-white rounded-xl font-black uppercase tracking-widest text-xs transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
+            >
+               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
+               Return Result
+            </button>
+          )}
+          {reviewMode && (
+            <div className="px-6 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-emerald-400 text-[10px] font-black uppercase tracking-widest">
+               Result Published
+            </div>
+          )}
         </div>
       </div>
 
@@ -281,15 +305,17 @@ export default function PremiumWorksheetMarking({
                  </div>
                ))}
             </div>
-            <div className="p-6 bg-[#0a0c10] border-t border-white/5">
-               <button 
-                 onClick={() => saveMarkings(false)}
-                 disabled={saving}
-                 className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all border border-white/5"
-               >
-                  <Save className="w-4 h-4" /> Save Progress
-               </button>
-            </div>
+            {!reviewMode && (
+              <div className="p-6 bg-[#0a0c10] border-t border-white/5">
+                <button 
+                  onClick={() => saveMarkings(false)}
+                  disabled={saving}
+                  className="w-full flex items-center justify-center gap-2 bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white py-3 rounded-xl font-black uppercase tracking-widest text-xs transition-all border border-white/5"
+                >
+                   <Save className="w-4 h-4" /> Save Progress
+                </button>
+              </div>
+            )}
          </div>
 
          {/* ── MAIN CONTENT: QUESTION GRADING ── */}
@@ -323,8 +349,12 @@ export default function PremiumWorksheetMarking({
                                          value={markings[q.id]?.marks_awarded ?? 0}
                                          max={q.marks}
                                          min={0}
-                                         onChange={(e) => updateMarking(q.id, { marks_awarded: Number(e.target.value) })}
-                                         className="w-10 bg-transparent text-white font-black text-sm focus:outline-none"
+                                         readOnly={reviewMode}
+                                         onChange={(e) => !reviewMode && updateMarking(q.id, { marks_awarded: Number(e.target.value) })}
+                                         className={cn(
+                                           "w-10 bg-transparent text-white font-black text-sm focus:outline-none",
+                                           reviewMode && "cursor-default"
+                                         )}
                                        />
                                        <span className="text-[10px] font-black text-slate-500 uppercase">PTS</span>
                                     </div>
@@ -395,10 +425,14 @@ export default function PremiumWorksheetMarking({
                                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Expert Evaluation</p>
                                  <textarea 
                                    value={markings[q.id]?.teacher_comment ?? ''}
-                                   onChange={(e) => updateMarking(q.id, { teacher_comment: e.target.value })}
-                                   placeholder="Draft your professional feedback for this specific unit..."
+                                   readOnly={reviewMode}
+                                   onChange={(e) => !reviewMode && updateMarking(q.id, { teacher_comment: e.target.value })}
+                                   placeholder={reviewMode ? "No evaluator commentary provided." : "Draft your professional feedback for this specific unit..."}
                                    rows={3}
-                                   className="w-full bg-slate-950/30 border border-white/5 rounded-2xl p-4 text-xs italic text-indigo-300 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none"
+                                   className={cn(
+                                     "w-full bg-slate-950/30 border border-white/5 rounded-2xl p-4 text-xs italic text-indigo-300 placeholder:text-slate-800 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none",
+                                     reviewMode && "cursor-default brightness-75"
+                                   )}
                                  />
                               </div>
                            </div>
@@ -426,20 +460,22 @@ export default function PremiumWorksheetMarking({
                          {strengths.map((s, i) => (
                            <span key={i} className="px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[10px] font-bold rounded-lg flex items-center gap-2">
                               {s}
-                              <button onClick={() => setStrengths(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                              {!reviewMode && <button onClick={() => setStrengths(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>}
                            </span>
                          ))}
-                         <input 
-                           placeholder="+ Add strength"
-                           onKeyDown={(e) => {
-                             if (e.key === 'Enter') {
-                               const val = (e.target as HTMLInputElement).value;
-                               if (val) setStrengths(prev => [...prev, val]);
-                               (e.target as HTMLInputElement).value = '';
-                             }
-                           }}
-                           className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-emerald-500 transition-all w-24"
-                         />
+                          {!reviewMode && (
+                            <input 
+                              placeholder="+ Add strength"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  if (val) setStrengths(prev => [...prev, val]);
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }}
+                              className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-emerald-500 transition-all w-24"
+                            />
+                          )}
                       </div>
                    </div>
 
@@ -450,20 +486,22 @@ export default function PremiumWorksheetMarking({
                          {weaknesses.map((w, i) => (
                            <span key={i} className="px-3 py-1.5 bg-rose-500/10 border border-rose-500/20 text-rose-400 text-[10px] font-bold rounded-lg flex items-center gap-2">
                               {w}
-                              <button onClick={() => setWeaknesses(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                              {!reviewMode && <button onClick={() => setWeaknesses(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>}
                            </span>
                          ))}
-                         <input 
-                           placeholder="+ Add weakness"
-                           onKeyDown={(e) => {
-                             if (e.key === 'Enter') {
-                               const val = (e.target as HTMLInputElement).value;
-                               if (val) setWeaknesses(prev => [...prev, val]);
-                               (e.target as HTMLInputElement).value = '';
-                             }
-                           }}
-                           className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-rose-500 transition-all w-24"
-                         />
+                          {!reviewMode && (
+                            <input 
+                              placeholder="+ Add weakness"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  if (val) setWeaknesses(prev => [...prev, val]);
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }}
+                              className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-rose-500 transition-all w-24"
+                            />
+                          )}
                       </div>
                    </div>
 
@@ -474,20 +512,22 @@ export default function PremiumWorksheetMarking({
                          {improvements.map((imp, i) => (
                            <span key={i} className="px-3 py-1.5 bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold rounded-lg flex items-center gap-2">
                               {imp}
-                              <button onClick={() => setImprovements(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>
+                              {!reviewMode && <button onClick={() => setImprovements(prev => prev.filter((_, idx) => idx !== i))}><X className="w-3 h-3" /></button>}
                            </span>
                          ))}
-                         <input 
-                           placeholder="+ Add improvement"
-                           onKeyDown={(e) => {
-                             if (e.key === 'Enter') {
-                               const val = (e.target as HTMLInputElement).value;
-                               if (val) setImprovements(prev => [...prev, val]);
-                               (e.target as HTMLInputElement).value = '';
-                             }
-                           }}
-                           className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-indigo-500 transition-all w-24"
-                         />
+                          {!reviewMode && (
+                            <input 
+                              placeholder="+ Add improvement"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  const val = (e.target as HTMLInputElement).value;
+                                  if (val) setImprovements(prev => [...prev, val]);
+                                  (e.target as HTMLInputElement).value = '';
+                                }
+                              }}
+                              className="bg-transparent border-b border-white/5 text-[10px] py-1 focus:outline-none focus:border-indigo-500 transition-all w-24"
+                            />
+                          )}
                       </div>
                    </div>
 
@@ -495,13 +535,17 @@ export default function PremiumWorksheetMarking({
 
                    <div className="space-y-3">
                       <label className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Executive Summary</label>
-                      <textarea 
-                        value={generalComment}
-                        onChange={(e) => setGeneralComment(e.target.value)}
-                        placeholder="Consolidate mission feedback..."
-                        rows={6}
-                        className="w-full bg-slate-900/50 border border-white/5 rounded-2xl p-4 text-xs text-slate-300 placeholder:text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none italic leading-relaxed"
-                      />
+                       <textarea 
+                         value={generalComment}
+                         readOnly={reviewMode}
+                         onChange={(e) => !reviewMode && setGeneralComment(e.target.value)}
+                         placeholder={reviewMode ? "No strategic summary provided." : "Consolidate mission feedback..."}
+                         rows={6}
+                         className={cn(
+                           "w-full bg-slate-900/50 border border-white/5 rounded-2xl p-4 text-xs text-slate-300 placeholder:text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500/30 transition-all resize-none italic leading-relaxed",
+                           reviewMode && "cursor-default brightness-75"
+                         )}
+                       />
                    </div>
                 </div>
              </div>
@@ -528,23 +572,40 @@ export default function PremiumWorksheetMarking({
                    <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activeQuestions.findIndex(quest => quest.id === annotatingQuestionId) + 1} Annotation Layer</h2>
                 </div>
                 <button 
-                  onClick={() => setAnnotatingQuestionId(null)}
-                  className="px-6 py-2 bg-indigo-500 text-white rounded-lg text-[10px] font-black uppercase tracking-widest"
+                  onClick={() => {
+                    setAnnotatingQuestionId(null);
+                    toast.success('Annotations saved to blueprint draft', {
+                      icon: <CheckSquare className="w-4 h-4 text-emerald-500" />
+                    });
+                  }}
+                  className="px-6 py-2 bg-indigo-500 hover:bg-indigo-600 text-white rounded-lg text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center gap-2"
                 >
+                   <CheckCircle2 className="w-3 h-3" />
                    Done Marking
                 </button>
              </div>
              <div className="flex-1 overflow-hidden">
                 <PremiumAnnotationEngine 
-                  questionContext={{
-                    text: q.question_text || '',
-                    answer: ansText || 'No digital footprint found'
-                  }}
                   initialAnnotations={markings[annotatingQuestionId]?.annotation_data || []}
                   onSave={(data) => {
                     updateMarking(annotatingQuestionId, { annotation_data: data });
                   }}
-                />
+                >
+                  <div className="space-y-12">
+                    <div className="p-8 bg-slate-50 border border-slate-200 rounded-3xl">
+                       <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">Question Blueprint</h3>
+                       <p className="text-2xl font-black text-slate-900 leading-tight">{q.question_text}</p>
+                    </div>
+
+                    <div className="p-8 bg-indigo-50 border border-indigo-100 rounded-3xl">
+                       <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-4">Student Response</h3>
+                       <p className="text-xl font-bold text-indigo-900 whitespace-pre-wrap">{ansText || 'No digital footprint found'}</p>
+                    </div>
+                    
+                    {/* Add extra space at the bottom for annotations if needed */}
+                    <div className="h-48" />
+                  </div>
+                </PremiumAnnotationEngine>
              </div>
           </div>
         );

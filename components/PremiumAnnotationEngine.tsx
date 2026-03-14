@@ -27,18 +27,18 @@ export interface Annotation {
 
 interface Props {
   imageUrl?: string;
-  questionContext?: { text: string; answer: string };
   initialAnnotations?: Annotation[];
   onSave: (annotations: Annotation[]) => void;
   readOnly?: boolean;
+  children?: React.ReactNode;
 }
 
 export default function PremiumAnnotationEngine({ 
   imageUrl, 
-  questionContext,
   initialAnnotations = [], 
   onSave,
-  readOnly = false 
+  readOnly = false,
+  children
 }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const fabricCanvasRef = useRef<fabric.Canvas | null>(null);
@@ -57,9 +57,9 @@ export default function PremiumAnnotationEngine({
     if (!canvasRef.current || fabricCanvasRef.current) return;
 
     const canvas = new fabric.Canvas(canvasRef.current, {
-      width: 800,
-      height: 1100,
-      backgroundColor: '#ffffff'
+      width: containerRef.current?.clientWidth || 800,
+      height: containerRef.current?.clientHeight || 1100,
+      backgroundColor: 'transparent'
     });
 
     fabricCanvasRef.current = canvas;
@@ -81,61 +81,90 @@ export default function PremiumAnnotationEngine({
     };
   }, []);
 
-  // Load Background Image or Question Context
+  // Handle Background Image and Container Sizing
   useEffect(() => {
     const canvas = fabricCanvasRef.current;
     if (!canvas) return;
+
+    // Reset Canvas State but keep transparency
+    canvas.clear();
+    canvas.backgroundColor = 'transparent';
+
+    const renderAnnotations = (objs: Annotation[]) => {
+      objs.forEach(ann => {
+        try {
+          if (ann.type === 'pen' || ann.type === 'highlighter') {
+            const pathData = (ann as any).pathData || (ann.points && ann.points.length > 0 ? 
+              ann.points.reduce((acc: string, p: any, i: number) => 
+                acc + (i === 0 ? `M ${p.x} ${p.y}` : ` L ${p.x} ${p.y}`), "") : null);
+
+            if (pathData) {
+               const path = new fabric.Path(pathData, {
+                 left: ann.x, top: ann.y,
+                 stroke: ann.color, 
+                 strokeWidth: ann.strokeWidth, 
+                 fill: 'transparent',
+                 strokeLineCap: 'round',
+                 strokeLineJoin: 'round',
+                 objectCaching: false
+               });
+               (path as any).id = ann.id;
+               (path as any).comment = ann.text;
+               canvas.add(path);
+            }
+          } else if (ann.type === 'tick') {
+             const shape = new fabric.Polyline([
+              { x: 0, y: 10 }, { x: 5, y: 15 }, { x: 15, y: 0 }
+             ], {
+              left: ann.x, top: ann.y, stroke: ann.color || '#10b981', 
+              strokeWidth: ann.strokeWidth || 4, fill: 'transparent',
+              objectCaching: false
+             });
+             (shape as any).id = ann.id;
+             (shape as any).comment = ann.text;
+             canvas.add(shape);
+          } else if (ann.type === 'cross') {
+             const shape = new fabric.Group([
+               new fabric.Line([0, 0, 15, 15], { stroke: ann.color || '#ef4444', strokeWidth: 4 }),
+               new fabric.Line([15, 0, 0, 15], { stroke: ann.color || '#ef4444', strokeWidth: 4 })
+             ], { left: ann.x, top: ann.y, objectCaching: false });
+             (shape as any).id = ann.id;
+             (shape as any).comment = ann.text;
+             canvas.add(shape);
+          }
+        } catch (e) {
+          console.warn("Failed to reconstruct annotation", ann, e);
+        }
+      });
+      canvas.renderAll();
+    };
 
     if (imageUrl) {
       fabric.Image.fromURL(imageUrl, { crossOrigin: 'anonymous' }).then((img: any) => {
         canvas.setDimensions({ width: img.width, height: img.height });
         canvas.backgroundImage = img;
-        canvas.renderAll();
+        renderAnnotations(initialAnnotations);
         setImageLoaded(true);
-        
-        // Load initial annotations if any
-        if (initialAnnotations.length > 0) {
-          // Here we would convert serializable annotations back to fabric objects
-          // For simplicity in this step, we focus on new creation
-        }
       }).catch((err: any) => {
         console.error("Failed to load background image:", err);
-        canvas.setDimensions({ width: 800, height: 1100 });
+        canvas.setDimensions({ width: containerRef.current?.clientWidth || 800, height: containerRef.current?.clientHeight || 1100 });
+        renderAnnotations(initialAnnotations);
         setImageLoaded(true);
       });
-    } else if (questionContext) {
-      canvas.setDimensions({ width: 800, height: 800 });
-      
-      const qText = new fabric.Textbox("Question:\n" + questionContext.text, {
-        left: 50,
-        top: 50,
-        width: 700,
-        fontSize: 22,
-        fontWeight: 'bold',
-        fill: '#1e293b',
-        selectable: false,
-        evented: false,
-      });
-      canvas.add(qText);
-
-      const aText = new fabric.Textbox("Student's Response:\n" + (questionContext.answer || "No response provided."), {
-        left: 50,
-        top: (qText.top || 50) + qText.getScaledHeight() + 40,
-        width: 700,
-        fontSize: 18,
-        fill: '#334155',
-        selectable: false,
-        evented: false,
-      });
-      canvas.add(aText);
-
-      canvas.renderAll();
-      setImageLoaded(true);
     } else {
-      canvas.setDimensions({ width: 800, height: 1100 });
-      setImageLoaded(true);
+        // Just sync dimensions with container for HTML overlay mode
+        setTimeout(() => {
+            if (containerRef.current) {
+                canvas.setDimensions({ 
+                    width: containerRef.current.scrollWidth, 
+                    height: containerRef.current.scrollHeight 
+                });
+            }
+            renderAnnotations(initialAnnotations);
+            setImageLoaded(true);
+        }, 100);
     }
-  }, [imageUrl, questionContext]);
+  }, [imageUrl, initialAnnotations]);
 
   // tool effect
   useEffect(() => {
@@ -214,17 +243,27 @@ export default function PremiumAnnotationEngine({
     const canvas = fabricCanvasRef.current;
     if (!canvas) return [];
     
-    return canvas.getObjects().map((obj: any) => ({
-      id: obj.id,
-      type: obj.type as any,
-      x: obj.left,
-      y: obj.top,
-      width: obj.width,
-      height: obj.height,
-      color: obj.stroke || obj.fill,
-      strokeWidth: obj.strokeWidth || 1,
-      text: obj.comment
-    }));
+    return canvas.getObjects().map((obj: any) => {
+      const base: Annotation = {
+        id: obj.id,
+        type: obj.type as any,
+        x: obj.left,
+        y: obj.top,
+        width: obj.width,
+        height: obj.height,
+        color: obj.stroke || obj.fill,
+        strokeWidth: obj.strokeWidth || 1,
+        text: obj.comment
+      };
+
+      if (obj.type === 'path') {
+        base.type = (obj as any).stroke?.includes('55') ? 'highlighter' : 'pen';
+        // Store path data string directly for robust reconstruction
+        (base as any).pathData = obj.path; 
+      }
+
+      return base;
+    });
   };
 
   const undo = () => {
@@ -305,10 +344,19 @@ export default function PremiumAnnotationEngine({
 
       {/* ── CANVAS AREA ── */}
       <div className="flex-1 overflow-auto bg-[#050505] p-12 flex justify-center custom-scrollbar" ref={containerRef}>
-        <div className="relative shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5 rounded-lg overflow-hidden h-fit bg-white">
-           <canvas ref={canvasRef} />
+        <div className="relative shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5 rounded-lg overflow-hidden h-fit w-full max-w-4xl bg-white">
+           {/* Layer 1: Worksheet Content (HTML) */}
+           <div className="worksheet-layer relative z-[1] w-full p-12 bg-white">
+              {children}
+           </div>
+
+           {/* Layer 2: Annotation Layer (Canvas Overlay) */}
+           <div className="absolute inset-0 z-[2]">
+              <canvas ref={canvasRef} />
+           </div>
+
            {!imageLoaded && (
-             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-indigo-400">
+             <div className="absolute inset-0 z-[3] flex flex-col items-center justify-center gap-4 text-indigo-400 bg-black/20 backdrop-blur-sm">
                 <div className="w-12 h-12 border-4 border-indigo-400/20 border-t-indigo-400 rounded-full animate-spin" />
                 <p className="font-black uppercase tracking-widest text-xs">Scanning Component...</p>
              </div>

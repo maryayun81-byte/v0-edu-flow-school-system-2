@@ -55,6 +55,7 @@ interface Assignment {
   subjects?: { name: string };
   _submissionCount?: number;
   _totalRecipients?: number;
+  _markedSubmissionCount?: number;
 }
 
 interface Submission {
@@ -62,10 +63,17 @@ interface Submission {
   student_id: string;
   assignment_id: string;
   status: string;
+  score?: number;
   submitted_at: string;
   profiles?: { full_name: string; admission_number: string };
   submission_files?: { id: string; file_name: string; file_url: string; file_type: string }[];
-  submission_feedback?: { score: number; strengths: string[]; weaknesses: string[]; is_returned: boolean }[];
+  submission_feedback?: { 
+    score: number; 
+    strengths: string[]; 
+    weaknesses: string[]; 
+    improvement_suggestions?: string[];
+    is_returned: boolean 
+  }[];
 }
 
 import * as pdfjsLib from 'pdfjs-dist';
@@ -1116,7 +1124,8 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
         // Initialize bulk marks
         const marks: Record<string, string> = {};
         (subs as Submission[]).forEach(s => {
-          marks[s.student_id] = String(s.submission_feedback?.[0]?.score ?? '');
+          const fbScore = s.submission_feedback?.[0]?.score;
+          marks[s.student_id] = fbScore !== undefined && fbScore !== null ? String(fbScore) : String(s.score ?? '');
         });
         setBulkMarks(marks);
       }
@@ -1199,14 +1208,32 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
       const sub = submissionMap.get(student.id);
       const isLate = sub ? new Date(sub.submitted_at) > dueDate : false;
       const isMarked = sub?.status === 'MARKED' || sub?.status === 'RETURNED';
-      const displayStatus = !sub ? 'NOT_SUBMITTED' : isLate ? 'LATE' : sub.status;
+      
+      let displayStatus: string;
+      if (!sub) {
+        displayStatus = 'NOT_SUBMITTED';
+      } else if (isMarked) {
+        displayStatus = sub.status; // Priorities Marked/Returned over Late
+      } else if (isLate) {
+        displayStatus = 'LATE';
+      } else {
+        displayStatus = sub.status;
+      }
+      
       return { student, sub, isLate, isMarked, displayStatus };
     })
     .filter(row => {
-      if (filter !== 'ALL' && row.displayStatus !== filter) return false;
+      if (filter !== 'ALL') {
+        if (filter === 'MARKED') {
+          if (row.displayStatus !== 'MARKED' && row.displayStatus !== 'RETURNED') return false;
+        } else if (row.displayStatus !== filter) {
+          return false;
+        }
+      }
       if (search && !row.student.full_name.toLowerCase().includes(search.toLowerCase())) return false;
       return true;
     });
+
 
   const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
   const rows = filteredRows.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
@@ -1397,19 +1424,20 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
                             />
                             <span className="text-slate-600 font-black text-[10px]">/ {assignment.total_marks}</span>
                           </div>
-                        ) : fb?.score != null ? (
+                        ) : (fb?.score ?? sub?.score) != null ? (
                           <div className="flex items-center gap-4">
                             <div className="w-10 h-10 rounded-xl bg-amber-500/10 flex items-center justify-center border border-amber-500/20 text-amber-500">
                               <Trophy className="w-5 h-5" />
                             </div>
                             <div>
-                              <p className="text-2xl font-black text-white">{fb.score}<span className="text-slate-500 font-normal text-sm ml-1">/ {assignment.total_marks}</span></p>
+                              <p className="text-2xl font-black text-white">{(fb?.score ?? sub?.score)}<span className="text-slate-500 font-normal text-sm ml-1">/ {assignment.total_marks}</span></p>
                               <div className="w-full bg-slate-800 h-1 rounded-full mt-1.5 overflow-hidden">
-                                <div className="bg-amber-500 h-full" style={{ width: `${(fb.score / assignment.total_marks) * 100}%` }} />
+                                <div className="bg-amber-500 h-full" style={{ width: `${((fb?.score ?? sub?.score)! / assignment.total_marks) * 100}%` }} />
                               </div>
                             </div>
                           </div>
                         ) : <span className="text-slate-700 font-black text-[10px] tracking-widest uppercase opacity-40">Unverified</span>}
+
                       </td>
                       <td className="px-8 py-6 text-right">
                         {sub ? (
@@ -1479,9 +1507,9 @@ function SubmissionsTable({ assignment, onBack }: { assignment: Assignment; onBa
                           />
                           <span className="text-slate-600 text-[9px] font-black">/ {assignment.total_marks}</span>
                         </div>
-                      ) : fb?.score != null ? (
-                        <p className="text-white font-black text-lg">{fb.score}<span className="text-slate-500 text-xs font-normal">/{assignment.total_marks}</span></p>
-                      ) : <p className="text-slate-700 font-black text-[9px] uppercase">UNGRADED</p>}
+                      ) : (fb?.score ?? sub?.score) != null ? (
+                        <p className="text-white font-black text-lg">{(fb?.score ?? sub?.score)}<span className="text-slate-500 text-xs font-normal">/{assignment.total_marks}</span></p>
+                      ) : <p className="text-slate-700 font-black text-[9px] uppercase">UNGARDED</p>}
                     </div>
                   </div>
 
@@ -1575,6 +1603,8 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
   const [viewingAssignment, setViewingAssignment] = useState<Assignment | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PUBLISHED' | 'DRAFT'>('ALL');
+  const [activeTab, setActiveTab] = useState<'OVERVIEW' | 'MARKING_QUEUE'>('OVERVIEW');
+
 
   useEffect(() => { fetchAssignments(); }, [userId]);
 
@@ -1594,11 +1624,12 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
       if (data) {
         // Enrich with submission counts
         const enriched = await Promise.all(data.map(async (a: any) => {
-          const [{ count: subCount }, { count: recipCount }] = await Promise.all([
-            supabase.from('student_submissions').select('*', { count: 'exact', head: true }).eq('assignment_id', a.id),
+          const [{ count: subCount }, { count: recipCount }, { count: markedCount }] = await Promise.all([
+            supabase.from('student_submissions').select('*', { count: 'exact', head: true }).eq('assignment_id', a.id).in('status', ['SUBMITTED', 'LATE', 'MARKED', 'RETURNED']),
             supabase.from('assignment_recipients').select('*', { count: 'exact', head: true }).eq('assignment_id', a.id),
+            supabase.from('student_submissions').select('*', { count: 'exact', head: true }).eq('assignment_id', a.id).in('status', ['MARKED', 'RETURNED']),
           ]);
-          return { ...a, _submissionCount: subCount || 0, _totalRecipients: recipCount || 0 };
+          return { ...a, _submissionCount: subCount || 0, _totalRecipients: recipCount || 0, _markedSubmissionCount: markedCount || 0 };
         }));
         setAssignments(enriched);
       }
@@ -1619,6 +1650,115 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
 
   const totalSubmissions = assignments.reduce((s, a) => s + (a._submissionCount || 0), 0);
   const totalPublished = assignments.filter(a => a.status === 'PUBLISHED').length;
+  const renderAssignmentCard = (assignment: any) => {
+    const isOver = new Date(assignment.due_date) < new Date();
+    const subRate = assignment._totalRecipients ? Math.round(((assignment._submissionCount || 0) / assignment._totalRecipients) * 100) : 0;
+    return (
+      <div
+        key={assignment.id}
+        className="group relative bg-slate-900/40 backdrop-blur-3xl border border-slate-700/30 rounded-[2.5rem] p-6 sm:p-8 hover:bg-slate-800/60 hover:border-indigo-500/30 transition-all duration-500 cursor-pointer shadow-2xl overflow-hidden"
+        onClick={() => setViewingAssignment(assignment)}
+      >
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8">
+          <div className="flex-1 min-w-0">
+            {/* Header Row: Icons + Status */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-5">
+              <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 text-xs font-black shrink-0">
+                {assignment.subjects?.name?.charAt(0)}
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                 <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">{assignment.submission_type}</span>
+                 
+                 <div className={cn(
+                   "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase border transition-all whitespace-nowrap",
+                   assignment.status === 'PUBLISHED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
+                 )}>
+                   <span className={cn("w-1 h-1 rounded-full", assignment.status === 'PUBLISHED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600')} />
+                   {assignment.status}
+                 </div>
+
+                 {isOver && assignment.status === 'PUBLISHED' && (
+                   <span className="px-3 py-1 bg-amber-500/10 text-amber-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-amber-500/20 whitespace-nowrap">Terminal</span>
+                 )}
+              </div>
+            </div>
+            
+            <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tighter group-hover:text-indigo-400 transition-all duration-300 uppercase leading-none">{assignment.title}</h3>
+            
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mt-8">
+              <div className="flex items-center gap-2.5">
+                <Users className="w-4 h-4 text-slate-600" />
+                <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.classes?.name}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <BookOpen className="w-4 h-4 text-slate-600" />
+                <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.subjects?.name}</span>
+              </div>
+              <div className="flex items-center gap-2.5">
+                <Clock className={cn("w-4 h-4", isOver ? 'text-rose-500' : 'text-slate-600')} />
+                <span className={cn("text-[10px] font-black uppercase tracking-widest", isOver ? 'text-rose-500' : 'text-slate-400')}>
+                  {isOver ? 'Terminal' : 'Due'} • {format(new Date(assignment.due_date), 'MMM d')}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-12 shrink-0 bg-slate-800/30 p-6 sm:p-8 rounded-[2rem] border border-slate-700/20 group-hover:bg-slate-800/50 transition-all duration-500">
+            <div className="text-center">
+              <p className="text-3xl sm:text-4xl font-black text-indigo-400 tracking-tighter">{assignment._submissionCount || 0}</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Transmitted</p>
+            </div>
+            
+            <div className="h-10 sm:h-12 w-px bg-slate-700/50" />
+
+            {(assignment._totalRecipients || 0) > 0 ? (
+              <div className="flex items-center gap-3 sm:gap-4">
+                <div className="relative w-12 h-12 sm:w-16 sm:h-16">
+                  <svg className="w-full h-full -rotate-90 drop-shadow-lg" viewBox="0 0 36 36">
+                    <circle cx="18" cy="18" r="15.91" fill="none" stroke="currentColor" className="text-slate-900" strokeWidth="4" />
+                    <circle
+                      cx="18" cy="18" r="15.91" fill="none"
+                      stroke={subRate >= 70 ? '#10b981' : subRate >= 40 ? '#f59e0b' : '#ef4444'}
+                      strokeWidth="4"
+                      strokeDasharray={`${subRate} 100`}
+                      strokeLinecap="round"
+                      className="transition-all duration-1000 ease-out"
+                    />
+                  </svg>
+                  <span className="absolute inset-0 flex items-center justify-center text-[8px] sm:text-[10px] font-black text-white">{subRate}%</span>
+                </div>
+                <div className="text-left hidden sm:block">
+                  <p className="text-white text-sm font-black tracking-tight">{assignment._totalRecipients} TOTAL</p>
+                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Roster Quota</p>
+                </div>
+                <div className="text-left sm:hidden">
+                    <p className="text-white text-xs font-black">{assignment._totalRecipients} UNIT</p>
+                </div>
+              </div>
+            ) : (
+              <div className="text-center">
+                 <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-900/50 flex items-center justify-center border border-slate-700/30">
+                    <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
+                 </div>
+                 <p className="text-[8px] sm:text-[9px] text-slate-600 font-black uppercase tracking-widest mt-2">Zero Roster</p>
+              </div>
+            )}
+            
+            <div className="text-center">
+              <p className="text-3xl sm:text-4xl font-black text-amber-400 tracking-tighter">{assignment._markedSubmissionCount || 0}</p>
+              <p className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Evaluated</p>
+            </div>
+
+            <div className="h-10 sm:h-12 w-px bg-slate-700/50" />
+
+            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500 text-indigo-400">
+              <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -1651,14 +1791,14 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
             <div className="absolute -top-4 -right-4 p-8 opacity-5 group-hover:opacity-10 transition-all duration-500 group-hover:scale-110">
               <CheckCircle2 className="w-24 h-24" />
             </div>
-            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">Efficiency</p>
+            <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">Evaluation Progress</p>
             <p className="text-4xl font-black text-white mt-2">
-              {assignments.length > 0 ? Math.round((totalSubmissions / assignments.reduce((s, a) => s + (a._totalRecipients || 0), 0)) * 100) || 0 : 0}%
+              {totalSubmissions > 0 ? Math.round((assignments.reduce((s, a) => s + (a._markedSubmissionCount || 0), 0) / totalSubmissions) * 100) || 0 : 0}%
             </p>
             <div className="mt-6 w-full bg-slate-900/50 h-2 rounded-full overflow-hidden border border-white/5">
               <div 
-                className="bg-gradient-to-r from-indigo-500 to-purple-500 h-full rounded-full transition-all duration-1000 ease-out" 
-                style={{ width: `${assignments.length > 0 ? (totalSubmissions / assignments.reduce((s, a) => s + (a._totalRecipients || 0), 0)) * 100 : 0}%` }} 
+                className="bg-gradient-to-r from-emerald-500 to-indigo-500 h-full rounded-full transition-all duration-1000 ease-out" 
+                style={{ width: `${totalSubmissions > 0 ? (assignments.reduce((s, a) => s + (a._markedSubmissionCount || 0), 0) / totalSubmissions) * 100 : 0}%` }} 
               />
             </div>
           </div>
@@ -1678,7 +1818,7 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
             </div>
             <p className="text-slate-500 text-[10px] font-black uppercase tracking-[0.3em]">Marking Queue</p>
             <p className="text-4xl font-black text-amber-500 mt-2">
-              {totalSubmissions - assignments.reduce((s, a) => s + (a.status === 'MARKED' || a.status === 'RETURNED' ? (a._submissionCount || 0) : 0), 0)}
+              {totalSubmissions - assignments.reduce((s, a) => s + (a._markedSubmissionCount || 0), 0)}
             </p>
             <p className="text-[10px] text-slate-500 font-bold mt-2 uppercase tracking-widest opacity-60">Pending Evaluation</p>
           </div>
@@ -1704,155 +1844,100 @@ export default function TeacherAssignmentDashboard({ userId }: { userId: string 
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search assignments..."
-            className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
-          />
-        </div>
-        <div className="flex gap-1.5">
-          {(['ALL', 'PUBLISHED', 'DRAFT'] as const).map(s => (
-            <button
-              key={s}
-              onClick={() => setStatusFilter(s)}
-              className={cn("px-4 py-2 rounded-xl text-sm font-medium transition-colors", statusFilter === s ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white')}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        <button onClick={fetchAssignments} className="p-2.5 hover:bg-slate-800 rounded-xl text-slate-400 hover:text-white border border-slate-700 transition-colors">
-          <RefreshCw className="w-4 h-4" />
-        </button>
+      {/* Tabs */}
+      <div className="flex items-center gap-6 border-b border-slate-800/50 mb-12">
+        {(['OVERVIEW', 'MARKING_QUEUE'] as const).map(tab => (
+          <button
+            key={tab}
+            onClick={() => setActiveTab(tab)}
+            className={cn(
+              "pb-4 px-2 text-sm font-black tracking-widest uppercase transition-all relative",
+              activeTab === tab ? "text-indigo-400" : "text-slate-500 hover:text-slate-300"
+            )}
+          >
+            {tab.replace('_', ' ')}
+            {activeTab === tab && (
+              <div className="absolute bottom-0 left-0 right-0 h-1 bg-indigo-500 rounded-full shadow-[0_0_20px_rgba(79,70,229,0.5)]" />
+            )}
+          </button>
+        ))}
       </div>
 
-
-
-      {/* Assignment cards */}
-      {loading ? (
-        <div className="flex justify-center py-24"><Loader2 className="w-12 h-12 text-indigo-400 animate-spin" /></div>
-      ) : filtered.length === 0 ? (
-        <div className="text-center py-24 bg-slate-900/40 backdrop-blur-3xl rounded-[3rem] border border-slate-700/30 shadow-2xl">
-          <div className="w-24 h-24 rounded-[2rem] bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 mx-auto mb-6">
-            <BookOpen className="w-12 h-12 text-indigo-400" />
+      {/* Tab Content */}
+      {activeTab === 'OVERVIEW' ? (
+        <div className="space-y-6">
+          {/* Filters */}
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+              <input
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search all assignments..."
+                className="w-full bg-slate-800 border border-slate-700 rounded-xl pl-10 pr-4 py-2.5 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm"
+              />
+            </div>
+            <div className="flex gap-1.5">
+              {(['ALL', 'PUBLISHED', 'DRAFT'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={cn("px-4 py-2 rounded-xl text-sm font-medium transition-colors", statusFilter === s ? 'bg-indigo-600 text-white' : 'bg-slate-800 text-slate-400 border border-slate-700 hover:text-white')}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-white text-xl font-black tracking-tight uppercase">Strategic Vacuum Detected</p>
-          <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-2 px-12 leading-relaxed">No assignments currently managed. Initialize your first academic session to begin tracking.</p>
-          <button onClick={() => setShowCreator(true)} className="mt-8 group relative flex items-center gap-3 px-8 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-lg mx-auto transition-all active:scale-95 overflow-hidden">
-            <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700" />
-            <Plus className="w-4 h-4" />
-            Initialize Assignment
-          </button>
+
+          {/* Assignment cards */}
+          {loading ? (
+            <div className="flex justify-center py-24"><Loader2 className="w-12 h-12 text-indigo-400 animate-spin" /></div>
+          ) : filtered.length === 0 ? (
+            <div className="text-center py-24 bg-slate-900/40 backdrop-blur-3xl rounded-[3rem] border border-slate-700/30 shadow-2xl">
+              <div className="w-24 h-24 rounded-[2rem] bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 mx-auto mb-6">
+                <BookOpen className="w-12 h-12 text-indigo-400" />
+              </div>
+              <p className="text-white text-xl font-black tracking-tight uppercase">Strategic Vacuum Detected</p>
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-2 px-12 leading-relaxed">No assignments currently managed.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-6">
+              {filtered.map(assignment => renderAssignmentCard(assignment))}
+            </div>
+          )}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-6">
-          {filtered.map(assignment => {
-            const isOver = new Date(assignment.due_date) < new Date();
-            const subRate = assignment._totalRecipients ? Math.round(((assignment._submissionCount || 0) / assignment._totalRecipients) * 100) : 0;
-            return (
-              <div
-                key={assignment.id}
-                className="group relative bg-slate-900/40 backdrop-blur-3xl border border-slate-700/30 rounded-[2.5rem] p-6 sm:p-8 hover:bg-slate-800/60 hover:border-indigo-500/30 transition-all duration-500 cursor-pointer shadow-2xl overflow-hidden"
-                onClick={() => setViewingAssignment(assignment)}
-              >
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 lg:gap-8">
-                  <div className="flex-1 min-w-0">
-                    {/* Header Row: Icons + Status */}
-                    <div className="flex flex-wrap items-center gap-2 sm:gap-4 mb-5">
-                      <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400 text-xs font-black shrink-0">
-                        {assignment.subjects?.name?.charAt(0)}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-2">
-                         <span className="text-[9px] font-black text-slate-500 uppercase tracking-[0.2em]">{assignment.submission_type}</span>
-                         
-                         <div className={cn(
-                           "inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[9px] font-black tracking-widest uppercase border transition-all whitespace-nowrap",
-                           assignment.status === 'PUBLISHED' ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' : 'bg-slate-800/50 text-slate-500 border-slate-700/50'
-                         )}>
-                           <span className={cn("w-1 h-1 rounded-full", assignment.status === 'PUBLISHED' ? 'bg-emerald-400 animate-pulse' : 'bg-slate-600')} />
-                           {assignment.status}
-                         </div>
-
-                         {isOver && assignment.status === 'PUBLISHED' && (
-                           <span className="px-3 py-1 bg-amber-500/10 text-amber-400 rounded-full text-[9px] font-black uppercase tracking-widest border border-amber-500/20 whitespace-nowrap">Terminal</span>
-                         )}
-                      </div>
-                    </div>
-                    
-                    <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tighter group-hover:text-indigo-400 transition-all duration-300 uppercase leading-none">{assignment.title}</h3>
-                    
-                    <div className="flex flex-wrap items-center gap-x-8 gap-y-4 mt-8">
-                      <div className="flex items-center gap-2.5">
-                        <Users className="w-4 h-4 text-slate-600" />
-                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.classes?.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2.5">
-                        <BookOpen className="w-4 h-4 text-slate-600" />
-                        <span className="text-slate-400 text-[10px] font-black uppercase tracking-wider">{assignment.subjects?.name}</span>
-                      </div>
-                      <div className="flex items-center gap-2.5">
-                        <Clock className={cn("w-4 h-4", isOver ? 'text-rose-500' : 'text-slate-600')} />
-                        <span className={cn("text-[10px] font-black uppercase tracking-widest", isOver ? 'text-rose-500' : 'text-slate-400')}>
-                          {isOver ? 'Terminal' : 'Due'} • {format(new Date(assignment.due_date), 'MMM d')}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between sm:justify-start gap-4 sm:gap-12 shrink-0 bg-slate-800/30 p-6 sm:p-8 rounded-[2rem] border border-slate-700/20 group-hover:bg-slate-800/50 transition-all duration-500">
-                    <div className="text-center">
-                      <p className="text-3xl sm:text-4xl font-black text-indigo-400 tracking-tighter">{assignment._submissionCount || 0}</p>
-                      <p className="text-[9px] sm:text-[10px] text-slate-500 font-black uppercase tracking-[0.2em] mt-1">Transmitted</p>
-                    </div>
-                    
-                    <div className="h-10 sm:h-12 w-px bg-slate-700/50" />
-
-                    {(assignment._totalRecipients || 0) > 0 ? (
-                      <div className="flex items-center gap-3 sm:gap-4">
-                        <div className="relative w-12 h-12 sm:w-16 sm:h-16">
-                          <svg className="w-full h-full -rotate-90 drop-shadow-lg" viewBox="0 0 36 36">
-                            <circle cx="18" cy="18" r="15.91" fill="none" stroke="currentColor" className="text-slate-900" strokeWidth="4" />
-                            <circle
-                              cx="18" cy="18" r="15.91" fill="none"
-                              stroke={subRate >= 70 ? '#10b981' : subRate >= 40 ? '#f59e0b' : '#ef4444'}
-                              strokeWidth="4"
-                              strokeDasharray={`${subRate} 100`}
-                              strokeLinecap="round"
-                              className="transition-all duration-1000 ease-out"
-                            />
-                          </svg>
-                          <span className="absolute inset-0 flex items-center justify-center text-[8px] sm:text-[10px] font-black text-white">{subRate}%</span>
-                        </div>
-                        <div className="text-left hidden sm:block">
-                          <p className="text-white text-sm font-black tracking-tight">{assignment._totalRecipients} TOTAL</p>
-                          <p className="text-[9px] text-slate-500 font-bold uppercase tracking-widest mt-0.5">Roster Quota</p>
-                        </div>
-                        <div className="text-left sm:hidden">
-                            <p className="text-white text-xs font-black">{assignment._totalRecipients} UNIT</p>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-center">
-                         <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-slate-900/50 flex items-center justify-center border border-slate-700/30">
-                            <AlertCircle className="w-4 h-4 sm:w-5 sm:h-5 text-slate-600" />
-                         </div>
-                         <p className="text-[8px] sm:text-[9px] text-slate-600 font-black uppercase tracking-widest mt-2">Zero Roster</p>
-                      </div>
-                    )}
-                    
-                    <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-full bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 group-hover:scale-110 transition-transform duration-500 text-indigo-400">
-                      <Eye className="w-4 h-4 sm:w-5 sm:h-5" />
-                    </div>
-                  </div>
-                </div>
+        <div className="space-y-6">
+          <div className="bg-amber-500/10 border border-amber-500/20 rounded-[2rem] p-6 mb-8 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-amber-500/20 rounded-xl">
+                 <Clock className="w-6 h-6 text-amber-500" />
               </div>
-            );
-          })}
+              <div>
+                <h3 className="text-lg font-black text-white uppercase tracking-widest">Marking Queue</h3>
+                <p className="text-amber-500/70 text-xs font-bold uppercase tracking-widest">Showing assignments with pending evaluations</p>
+              </div>
+            </div>
+          </div>
+
+          {loading ? (
+            <div className="flex justify-center py-24"><Loader2 className="w-12 h-12 text-indigo-400 animate-spin" /></div>
+          ) : assignments.filter(a => (a._submissionCount || 0) > (a._markedSubmissionCount || 0)).length === 0 ? (
+            <div className="text-center py-24 bg-slate-900/40 backdrop-blur-3xl rounded-[3rem] border border-slate-700/30 shadow-2xl">
+              <div className="w-24 h-24 rounded-[2rem] bg-emerald-500/10 flex items-center justify-center border border-emerald-500/20 mx-auto mb-6">
+                <CheckCircle2 className="w-12 h-12 text-emerald-400" />
+              </div>
+              <p className="text-white text-xl font-black tracking-tight uppercase">Queue Liquidated</p>
+              <p className="text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em] mt-2 px-12 leading-relaxed">All submitted assets have been successfully evaluated.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 gap-6">
+              {assignments
+                .filter(a => (a._submissionCount || 0) > (a._markedSubmissionCount || 0))
+                .map(assignment => renderAssignmentCard(assignment))}
+            </div>
+          )}
         </div>
       )}
     </div>

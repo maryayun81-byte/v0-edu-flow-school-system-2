@@ -278,12 +278,17 @@ export default function PremiumWorksheetBuilder({
   const saveWorksheet = async () => {
     setSaving(true);
     try {
-      // Questions are atomicly saved on add/delete, but we might want to sync text/marks updates
-      // Optimized: bulk update only modified questions or just all in the current page
-      const currentQuestions = pages[activePageIndex].questions;
-      
-      for (const q of currentQuestions) {
-        await supabase
+      // 1. Calculate total marks across ALL pages
+      const totalMarks = pages.reduce((acc, page) => {
+        return acc + page.questions.reduce((sum, q) => sum + (q.marks || 0), 0);
+      }, 0);
+
+      // 2. Build a flat list of all questions to update
+      const allQuestions = pages.flatMap(p => p.questions);
+
+      // 3. Update all questions and all pages in parallel
+      const questionUpdates = allQuestions.map(q => 
+        supabase
           .from('assignment_questions')
           .update({
             question_text: q.question_text,
@@ -292,23 +297,34 @@ export default function PremiumWorksheetBuilder({
             options: q.options,
             is_required: q.is_required
           })
-          .eq('id', q.id);
-      }
+          .eq('id', q.id)
+      );
 
-      // Sync page metadata
-      const page = pages[activePageIndex];
-      await supabase
-        .from('assignment_pages')
-        .update({
-          header_title: page.header_title,
-          footer_text: page.footer_text
-        })
-        .eq('id', page.id);
+      const pageUpdates = pages.map(p => 
+        supabase
+          .from('assignment_pages')
+          .update({
+            header_title: p.header_title,
+            footer_text: p.footer_text
+          })
+          .eq('id', p.id)
+      );
 
-      toast.success('Worksheet page saved successfully');
+      // 4. Execute all updates and assignment total marks update
+      await Promise.all([
+        ...questionUpdates,
+        ...pageUpdates,
+        supabase
+          .from('assignments')
+          .update({ total_marks: totalMarks })
+          .eq('id', assignmentId)
+      ]);
+
+      toast.success('Worksheet blueprint deployed successfully');
       onSave?.();
     } catch (err) {
-      toast.error('Failed to save changes');
+      toast.error('Failed to deploy blueprint');
+      console.error(err);
     } finally {
       setSaving(false);
     }

@@ -6,7 +6,7 @@ import {
   FileText, Clock, CheckCircle2, AlertCircle, ArrowLeft,
   Download, Upload, Image, Camera, Trash2, Loader2, Send,
   XCircle, Eye, Star, TrendingUp, TrendingDown, BookOpen,
-  ChevronRight, MessageSquare, Flag, Pencil
+  ChevronRight, MessageSquare, Flag, Pencil, Trophy, Calendar, ArrowRight, ChevronLeft
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { cn } from '@/lib/utils';
@@ -41,17 +41,19 @@ interface AssignmentFile {
 
 interface StudentSubmission {
   id: string;
+  assignment_id?: string;
   status: string;
   submitted_at: string;
   score?: number; // Instant score from submission record
   marked_file_url?: string;
+  is_late?: boolean;
   submission_files?: { id: string; file_name: string; file_url: string; file_type: string }[];
-  submission_feedback?: { 
-    score: number; 
-    strengths: string[]; 
-    weaknesses: string[]; 
+  submission_feedback?: {
+    score: number;
+    strengths: string[];
+    weaknesses: string[];
     improvement_suggestions?: string[];
-    is_returned: boolean 
+    is_returned: boolean
   }[];
   submission_annotations?: { annotation_data: any[] }[];
   strengths?: string[];
@@ -215,9 +217,9 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
           Due {format(new Date(assignment.due_date), 'EEEE, MMMM d, yyyy')} at {format(new Date(assignment.due_date), 'h:mm a')}
           {isOverdue && <span className="text-red-400 font-bold ml-1">— OVERDUE</span>}
         </div>
-        {assignment.type === 'ONLINE_AUTO_GRADED' && !submission && (
+        {(assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE') && !submission && (
            <div className="pt-6">
-              <button 
+              <button
                 onClick={() => setShowWorksheetPlayer(true)}
                 className="w-full flex items-center justify-center gap-3 py-4 bg-indigo-600 hover:bg-indigo-500 text-white rounded-[1.5rem] font-black uppercase tracking-widest text-xs transition-all shadow-xl shadow-indigo-500/20 active:scale-[0.98]"
               >
@@ -237,15 +239,16 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
 
       {showWorksheetPlayer && (
         <div className="fixed inset-0 w-full h-[100dvh] z-[100] bg-[#0a0c10] flex flex-col">
-          <PremiumWorksheetPlayer 
-            assignmentId={assignment.id} 
-            studentId={studentId} 
+          <PremiumWorksheetPlayer
+            assignmentId={assignment.id}
+            studentId={studentId}
             submissionId={submission?.id}
             onClose={() => setShowWorksheetPlayer(false)}
             onSubmit={() => {
                setShowWorksheetPlayer(false);
                onBack(); // Refresh list
             }}
+            reviewMode={submission?.status === 'RETURNED' || submission?.status === 'MARKED' || submission?.status === 'SUBMITTED' || submission?.status === 'LATE'}
           />
         </div>
       )}
@@ -395,7 +398,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
               )}
 
               {/* Strategic Evaluation Output (Marked Script) */}
-              {(assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'WORKSHEET') && isReturned && (
+              {(assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE' || assignment.type === 'ONLINE_WORKSHEET') && isReturned && (
                 <button
                   onClick={() => setShowWorksheetPlayer(true)}
                   className="w-full flex items-center justify-between p-4 bg-indigo-500/10 border border-indigo-500/20 rounded-2xl hover:bg-indigo-500/20 transition-all group"
@@ -424,7 +427,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                       <p className="text-[10px] text-indigo-400/60 font-bold uppercase tracking-widest">Enterprise Digital Assessment Final</p>
                     </div>
                   </div>
-                   <button 
+                   <button
                     onClick={() => generateAssignmentPDFReport(submission.id)}
                     className="flex items-center gap-2 px-6 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg group-hover:scale-105"
                   >
@@ -434,7 +437,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                 </div>
               )}
 
-              {submission.status === 'RETURNED' && (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'WORKSHEET') && (
+              {submission.status === 'RETURNED' && (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE' || assignment.type === 'ONLINE_WORKSHEET') && (
                 <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-2xl flex items-center justify-between group">
                   <div className="flex items-center gap-3">
                     <div className="p-2 bg-emerald-500/20 rounded-lg">
@@ -445,7 +448,7 @@ function AssignmentDetail({ assignment, studentId, onBack }: { assignment: Assig
                       <p className="text-[10px] text-emerald-400/60 font-bold uppercase tracking-widest">Generate Professional PDF Script</p>
                     </div>
                   </div>
-                  <button 
+                  <button
                     onClick={() => generateAssignmentPDFReport(submission.id)}
                     className="flex items-center gap-2 px-6 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all active:scale-95 shadow-lg group-hover:scale-105"
                   >
@@ -620,6 +623,9 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
   const [loading, setLoading] = useState(true);
   const [selectedAssignment, setSelectedAssignment] = useState<Assignment | null>(null);
   const [filter, setFilter] = useState<'ALL' | 'PENDING' | 'SUBMITTED' | 'MARKED'>('ALL');
+  const [showMarkingReview, setShowMarkingReview] = useState(false);
+  const [viewingSubmission, setViewingSubmission] = useState<StudentSubmission | null>(null);
+
 
   useEffect(() => { fetchAssignments(); }, [studentId]);
 
@@ -639,7 +645,7 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
         .from('student_classes')
         .select('class_id')
         .eq('student_id', studentId);
-        
+
       const { data: enrollmentRows } = await supabase
         .from('student_subject_enrollments')
         .select('class_id')
@@ -647,7 +653,7 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
 
       const legacyClassIds = classRows?.map((c: any) => c.class_id) || [];
       const enrollmentClassIds = enrollmentRows?.map((c: any) => c.class_id) || [];
-      
+
       const classIds = Array.from(new Set([...legacyClassIds, ...enrollmentClassIds]));
 
       if (recipientIds.length === 0 && classIds.length === 0) {
@@ -690,10 +696,13 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
 
       const subMap = new Map(submissions?.map((s: any) => [s.assignment_id, s]) || []);
 
-      const enriched: Assignment[] = rawAssignments.map((a: any) => ({
-        ...a,
-        student_submission: subMap.get(a.id) || null,
-      }));
+      const enriched: Assignment[] = rawAssignments.map((a: any) => {
+        const sub = subMap.get(a.id);
+        return {
+          ...a,
+          student_submission: sub ? { ...sub, assignment_id: a.id } : null,
+        };
+      });
 
       setAssignments(enriched);
     } catch (err) {
@@ -713,15 +722,119 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
     );
   }
 
+  if (showMarkingReview && viewingSubmission && viewingSubmission.assignment_id) {
+    const assignment = assignments.find(a => a.id === viewingSubmission.assignment_id);
+    if (!assignment) {
+      // Handle case where assignment is not found (shouldn't happen if data is consistent)
+      setShowMarkingReview(false);
+      setViewingSubmission(null);
+      return null;
+    }
+    return (
+      <div className="fixed inset-0 w-full h-[100dvh] z-[100] bg-[#0a0c10] flex flex-col">
+        <PremiumWorksheetPlayer
+          assignmentId={assignment.id}
+          studentId={studentId}
+          submissionId={viewingSubmission.id}
+          onClose={() => {
+            setShowMarkingReview(false);
+            setViewingSubmission(null);
+          }}
+          onSubmit={() => {
+            setShowMarkingReview(false);
+            setViewingSubmission(null);
+            fetchAssignments(); // Refresh list
+          }}
+          reviewMode={true}
+        />
+      </div>
+    );
+  }
+
   const filtered = assignments.filter(a => {
     const sub = a.student_submission;
     const isSubmitted = !!sub;
-    const isMarked = sub?.status === 'MARKED' || sub?.status === 'RETURNED';
+    const isMarked = sub?.status === 'RETURNED' || sub?.status === 'MARKED';
     if (filter === 'PENDING') return !isSubmitted;
     if (filter === 'SUBMITTED') return isSubmitted && !isMarked;
     if (filter === 'MARKED') return isMarked;
     return true;
   });
+
+  const AssignmentCard = ({ assignment }: { assignment: Assignment }) => {
+    const subData = assignment.student_submission ? [assignment.student_submission] : [];
+    const submission = subData?.[0];
+    const isMarked = submission?.status === 'RETURNED' || submission?.status === 'MARKED';
+    const isLate = submission?.is_late || (assignment.due_date && new Date() > new Date(assignment.due_date) && !submission);
+
+    return (
+      <div key={assignment.id} className="group relative">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-indigo-500/50 transition-all duration-300 shadow-xl">
+          <div className="p-6">
+            <div className="flex items-start justify-between mb-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center border border-indigo-500/20 text-indigo-400">
+                  <FileText className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-white font-bold group-hover:text-indigo-400 transition-colors">{assignment.title}</h3>
+                  <p className="text-slate-500 text-xs mt-0.5">{assignment.subjects?.name} • {assignment.classes?.name}</p>
+                </div>
+              </div>
+              <div className={cn(
+                "px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border",
+                isMarked ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" :
+                submission ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/20" :
+                isLate ? "bg-rose-500/10 text-rose-400 border-rose-500/20" :
+                "bg-slate-800 text-slate-500 border-slate-700"
+              )}>
+                {isMarked ? "Marked" : submission ? "Submitted" : isLate ? "Late" : "Pending"}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4 mb-6 pt-4 border-t border-slate-800/50">
+              <div>
+                <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-1">Due Date</p>
+                <div className="flex items-center gap-2 text-slate-300">
+                  <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                  <span className="text-xs font-bold">{format(new Date(assignment.due_date), 'MMM d, yyyy')}</span>
+                </div>
+              </div>
+              {isMarked && (submission?.score != null) && (
+                <div>
+                  <p className="text-slate-500 text-[9px] font-black uppercase tracking-widest mb-1">Your Score</p>
+                  <div className="flex items-center gap-2 text-emerald-400 font-black">
+                    <Trophy className="w-4 h-4" />
+                    <span className="text-sm">{submission.score} / {assignment.total_marks || 100}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {isMarked && (assignment.type === 'ONLINE_AUTO_GRADED' || assignment.submission_type === 'INTERACTIVE' || assignment.type === 'ONLINE_WORKSHEET') && (
+                <button
+                  onClick={() => {
+                     setViewingSubmission(submission);
+                     setShowMarkingReview(true);
+                  }}
+                  className="w-full py-3 bg-emerald-500/10 hover:bg-emerald-500 text-emerald-400 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest border border-emerald-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <Trophy className="w-4 h-4" /> Review Annotated Worksheet
+                </button>
+              )}
+              <button
+                onClick={() => setSelectedAssignment(assignment)}
+                className="w-full py-3 bg-indigo-500 hover:bg-indigo-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+              >
+                {submission ? "View Submission" : "Open Assignment"} <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -759,78 +872,9 @@ export default function EnterpriseStudentAssignments({ studentId }: Props) {
         </div>
       ) : (
         <div className="grid gap-4">
-          {filtered.map(assignment => {
-            const sub = assignment.student_submission;
-            const isSubmitted = !!sub;
-            const isMarked = sub?.status === 'MARKED' || sub?.status === 'RETURNED';
-            const isOverdue = new Date(assignment.due_date) < new Date();
-            const feedback = sub?.submission_feedback?.[0];
-
-            return (
-              <div
-                key={assignment.id}
-                onClick={() => setSelectedAssignment(assignment)}
-                className={cn(
-                  "group cursor-pointer bg-card border rounded-2xl p-5 transition-all hover:shadow-lg",
-                  isMarked ? 'border-emerald-500/30 hover:border-emerald-500/50' :
-                  isSubmitted ? 'border-indigo-500/30 hover:border-indigo-500/50' :
-                  isOverdue ? 'border-red-500/30 hover:border-red-500/50' :
-                  'border-border/50 hover:border-primary/30'
-                )}
-              >
-                <div className="flex items-start gap-4">
-                  {/* Status Icon */}
-                  <div className={cn(
-                    "w-11 h-11 rounded-xl flex items-center justify-center shrink-0",
-                    isMarked ? 'bg-emerald-500/10' : isSubmitted ? 'bg-indigo-500/10' : isOverdue ? 'bg-red-500/10' : 'bg-muted'
-                  )}>
-                    {isMarked ? <CheckCircle2 className="w-5 h-5 text-emerald-400" /> :
-                     isSubmitted ? <Send className="w-5 h-5 text-indigo-400" /> :
-                     isOverdue ? <AlertCircle className="w-5 h-5 text-red-400" /> :
-                     <FileText className="w-5 h-5 text-muted-foreground" />}
-                  </div>
-
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-foreground group-hover:text-primary transition-colors">{assignment.title}</p>
-                        <p className="text-muted-foreground text-sm mt-0.5">
-                          {assignment.subjects?.name} · {assignment.classes?.name}
-                        </p>
-                      </div>
-                      {isMarked && (feedback?.score ?? sub.score) != null && (
-                        <div className="text-right shrink-0">
-                          <div className="text-xl font-black text-amber-400">{(feedback?.score ?? sub.score)}/{assignment.total_marks}</div>
-                          <div className="text-xs text-muted-foreground">
-                            {Math.round(((feedback?.score ?? sub.score)! / assignment.total_marks) * 100)}%
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-muted-foreground">
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3 h-3" />
-                        <span className={isOverdue && !isSubmitted ? 'text-red-400 font-medium' : ''}>
-                          Due {format(new Date(assignment.due_date), 'MMM d, h:mm a')}
-                        </span>
-                      </span>
-                      <span className="w-1 h-1 bg-muted-foreground/30 rounded-full" />
-                      <span>{assignment.submission_type}</span>
-                      {assignment.assignment_files && assignment.assignment_files.length > 0 && (
-                        <>
-                          <span className="w-1 h-1 bg-muted-foreground/30 rounded-full" />
-                          <span>{assignment.assignment_files.length} resource file{assignment.assignment_files.length !== 1 ? 's' : ''}</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-primary transition-colors shrink-0 mt-1" />
-                </div>
-              </div>
-            );
-          })}
+          {filtered.map(assignment => (
+            <AssignmentCard key={assignment.id} assignment={assignment} />
+          ))}
         </div>
       )}
     </div>
