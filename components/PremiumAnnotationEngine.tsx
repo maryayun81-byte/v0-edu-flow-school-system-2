@@ -141,9 +141,28 @@ export default function PremiumAnnotationEngine({
 
     if (imageUrl) {
       fabric.Image.fromURL(imageUrl, { crossOrigin: 'anonymous' }).then((img: any) => {
-        canvas.setDimensions({ width: img.width, height: img.height });
+        const containerWidth = containerRef.current?.clientWidth || 800;
+        const scale = Math.min(1, containerWidth / img.width);
+        
+        const finalWidth = img.width * scale;
+        const finalHeight = img.height * scale;
+
+        canvas.setDimensions({ 
+          width: finalWidth, 
+          height: finalHeight 
+        });
+        
+        img.scale(scale);
         canvas.backgroundImage = img;
-        renderAnnotations(initialAnnotations);
+
+        // Render annotations with appropriate scaling
+        renderAnnotations(initialAnnotations.map(ann => ({
+          ...ann,
+          x: ann.x * scale,
+          y: ann.y * scale,
+          strokeWidth: (ann.strokeWidth || 4) * scale
+        })));
+
         setImageLoaded(true);
       }).catch((err: any) => {
         console.error("Failed to load background image:", err);
@@ -364,16 +383,16 @@ export default function PremiumAnnotationEngine({
       </div>
 
       {/* ── CANVAS AREA ── */}
-      <div className="flex-1 overflow-auto bg-[#050505] p-12 flex justify-center custom-scrollbar" ref={containerRef}>
+      <div className="flex-1 overflow-auto bg-[#050505] p-4 sm:p-12 flex justify-center custom-scrollbar" ref={containerRef}>
         <div className="relative shadow-[0_0_100px_rgba(0,0,0,0.5)] border border-white/5 rounded-lg overflow-hidden h-fit w-full max-w-4xl bg-white">
            {/* Layer 1: Worksheet Content (HTML) */}
-           <div className="worksheet-layer relative z-[1] w-full p-12 bg-white">
+           <div className="worksheet-layer relative z-[1] w-full p-4 sm:p-12 bg-white">
               {children}
            </div>
 
            {/* Layer 2: Annotation Layer (Canvas Overlay) */}
-           <div className="absolute inset-0 z-[2]">
-              <canvas ref={canvasRef} />
+           <div className="absolute inset-0 z-[2] pointer-events-none">
+              <canvas ref={canvasRef} className="max-w-full h-auto" />
            </div>
 
            {!imageLoaded && (

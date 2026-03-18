@@ -199,22 +199,27 @@ export default function PremiumWorksheetPlayer(props: {
           setMarkings(markingMap);
         }
 
-        if (feedbackRes.data) {
-          setGlobalFeedback({
-            strengths: feedbackRes.data.strengths || [],
-            weaknesses: feedbackRes.data.weaknesses || [],
-            improvement_suggestions: feedbackRes.data.improvement_suggestions || [],
-            teacher_remarks: feedbackRes.data.teacher_remarks
-          });
-        }
+      if (feedbackRes.data) {
+        console.log("Feedback found for ID:", currentSubId, feedbackRes.data);
+        setGlobalFeedback({
+          strengths: feedbackRes.data.strengths || [],
+          weaknesses: feedbackRes.data.weaknesses || [],
+          improvement_suggestions: feedbackRes.data.improvement_suggestions || [],
+          teacher_remarks: feedbackRes.data.teacher_remarks
+        });
+      } else {
+        console.warn("No feedback data returned from DB for sub:", currentSubId);
       }
-    } catch (err: any) {
-      toast.error('Failed to load worksheet');
-      console.error(err);
-    } finally {
-      setLoading(false);
+    } else {
+      console.warn("No currentSubId found during fetch");
     }
+  } catch (err: any) {
+    toast.error('Failed to load worksheet');
+    console.error("Load worksheet CRITICAL error:", err);
+  } finally {
+    setLoading(false);
   }
+}
 
   async function saveAnswer(questionId: string, answerData: any) {
     if (reviewMode || isPreview || !submissionId) return;
@@ -375,8 +380,8 @@ export default function PremiumWorksheetPlayer(props: {
   return (
     <div className="flex flex-col h-full bg-[#0a0c10] text-slate-200">
       {/* ── HEADER ── */}
-      <div className="bg-[#0f1117] border-b border-slate-800 p-4 sm:px-8 sm:h-20 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 z-10">
-        <div className="flex items-center gap-4 sm:gap-6 w-full sm:w-auto">
+      <div className="bg-[#0f1117] border-b border-slate-800 p-3 sm:px-8 h-16 sm:h-20 flex items-center justify-between gap-4 z-10 shrink-0">
+        <div className="flex items-center gap-2 sm:gap-6 min-w-0">
           <button 
             onClick={onClose}
             className="p-2 -ml-2 sm:ml-0 text-slate-400 hover:text-white transition-colors shrink-0"
@@ -492,10 +497,10 @@ export default function PremiumWorksheetPlayer(props: {
           {activePage.questions.map((q, idx) => (
              <div 
                key={q.id}
-               className="bg-[#0f1117] border border-slate-800 rounded-[2rem] p-8 shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500"
+               className="bg-[#0f1117] border border-slate-800 rounded-[1.5rem] sm:rounded-[2rem] p-4 sm:p-8 shadow-xl animate-in fade-in slide-in-from-bottom-4 duration-500"
                style={{ animationDelay: `${idx * 100}ms` }}
              >
-                <div className="flex items-start justify-between mb-6">
+                <div className="flex items-start justify-between mb-4 sm:mb-6">
                    <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-slate-800 flex items-center justify-center text-slate-400 font-black">
                          {q.order_index + 1}
@@ -707,21 +712,22 @@ export default function PremiumWorksheetPlayer(props: {
 
         return (
           <div className="fixed inset-0 z-[110] bg-black/95 flex flex-col animate-in fade-in duration-300">
-             <div className="h-20 bg-[#0f1117] border-b border-white/5 px-8 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                   <button onClick={() => setViewingAnnotationsId(null)} className="p-2 text-slate-400 hover:text-white transition-colors">
+             <div className="h-16 sm:h-20 bg-[#0f1117] border-b border-white/5 px-4 sm:px-8 flex items-center justify-between">
+                <div className="flex items-center gap-2 sm:gap-4">
+                   <button onClick={() => setViewingAnnotationsId(null)} className="p-2 -ml-2 text-slate-400 hover:text-white transition-colors">
                       <ChevronLeft className="w-5 h-5" />
                    </button>
                    <div>
-                      <p className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Visual Assessment Layer</p>
-                      <h2 className="text-sm font-black text-white uppercase tracking-widest">Question {activePage.questions.findIndex(quest => quest.id === viewingAnnotationsId) + 1} Annotations</h2>
+                      <p className="text-[8px] sm:text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em]">Visual Assessment Layer</p>
+                      <h2 className="text-xs sm:text-sm font-black text-white uppercase tracking-widest truncate max-w-[150px] sm:max-w-none">Question {activePage.questions.findIndex(quest => quest.id === viewingAnnotationsId) + 1}</h2>
                    </div>
                 </div>
                 <button 
                   onClick={() => setViewingAnnotationsId(null)}
-                  className="px-8 py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
+                  className="px-4 sm:px-8 py-2 sm:py-3 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all"
                 >
-                  Close Engine
+                  <span className="hidden sm:inline">Close Engine</span>
+                  <span className="sm:hidden">Close</span>
                 </button>
              </div>
              <div className="flex-1 overflow-hidden">
@@ -730,19 +736,19 @@ export default function PremiumWorksheetPlayer(props: {
                   onSave={() => {}}
                   readOnly={true}
                 >
-                   <div className="space-y-12 max-w-4xl mx-auto py-12 px-8">
-                     <div className="p-8 bg-slate-50 border border-slate-200 rounded-3xl">
+                   <div className="space-y-6 sm:space-y-12 max-w-4xl mx-auto py-8 sm:py-12 px-4 sm:px-8">
+                     <div className="p-4 sm:p-8 bg-slate-50 border border-slate-200 rounded-2xl sm:rounded-3xl">
                         <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] mb-4">Question Blueprint</h3>
                         <p className="text-2xl font-black text-slate-900 leading-tight">{q.question_text}</p>
                      </div>
 
-                     <div className="p-8 bg-indigo-50 border border-indigo-100 rounded-3xl">
+                     <div className="p-4 sm:p-8 bg-indigo-50 border border-indigo-100 rounded-2xl sm:rounded-3xl">
                         <h3 className="text-[10px] font-black text-indigo-400 uppercase tracking-[0.2em] mb-4">Student Response</h3>
                         <p className="text-xl font-bold text-indigo-900 whitespace-pre-wrap">{ansText || 'No digital footprint found'}</p>
                      </div>
                      
                      {/* Safe space for annotations */}
-                     <div className="h-48" />
+                     <div className="h-24 sm:h-48" />
                    </div>
                 </PremiumAnnotationEngine>
              </div>
