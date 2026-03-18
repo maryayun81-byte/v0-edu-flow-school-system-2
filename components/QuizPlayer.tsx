@@ -209,7 +209,7 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
   }
 
   const handleSubmit = useCallback(async () => {
-    if (quizState === 'completed') return;
+    if (quizState === 'completed' || !quiz) return;
     
     // Calculate score
     let totalScore = 0;
@@ -244,11 +244,12 @@ export default function QuizPlayer({ quizId, studentName, onComplete, onExit }: 
           points_earned: totalScore,
           answers: answers,
           status: 'graded', // Mark as graded since we did client-side grading
-          time_taken_seconds: quiz?.duration_minutes 
+          time_taken_seconds: (quiz.duration_minutes 
             ? (quiz.duration_minutes * 60) - (timeRemaining || 0)
-            : null
+            : null)
         })
         .eq('id', attemptId);
+
 
       // Also insert into individual quiz_answers table for better analytics/grading tracking
       const answerRecords = questions.map(q => {
